@@ -2,8 +2,8 @@
 
 #include <vector>
 
-#include "disk_space_manager/database_file.h"
 #include "disk_space_manager/file.h"
+#include "gtest_printf.h"
 
 class DiskSpaceManagerTest : public ::testing::Test {
  protected:
@@ -26,19 +26,17 @@ class DiskSpaceManagerTest : public ::testing::Test {
 
 TEST_F(DiskSpaceManagerTest, open_db_file) {
   SetUp("test_open_db_file.db");
-  DatabaseFile file(fd);
 
-  ASSERT_EQ(file.get_size(), kDefaultFileSize);
+  ASSERT_EQ(file_size(fd), kDefaultFileSize);
 
   uint64_t target_num_pages = kDefaultFileSize / kPageSize;
   header_page_t header_page;
-  file.get_header_page(&header_page);
-  ASSERT_EQ(header_page.num_of_pages, target_num_pages);
+  file_read_header_page(fd, &header_page);
+  ASSERT_EQ(header_page.header.num_of_pages, target_num_pages);
 }
 
 TEST_F(DiskSpaceManagerTest, alloc_dealloc_pages) {
   SetUp("test_alloc_dealloc_pages.db");
-  DatabaseFile file(fd);
   uint32_t allocating_pages = 1234;
 
   std::vector<pagenum_t> allocated_pages;
@@ -53,27 +51,26 @@ TEST_F(DiskSpaceManagerTest, alloc_dealloc_pages) {
   }
 
   header_page_t header_page;
-  file.get_header_page(&header_page);
-  for (int i = 0; i < header_page.num_of_pages - 1; ++i) {
+  file_read_header_page(fd, &header_page);
+  for (int i = 0; i < header_page.header.num_of_pages - 1; ++i) {
     ASSERT_NE(file_alloc_page(fd), 0);
   }
-  ASSERT_EQ(file.get_size(), kDefaultFileSize);
+  ASSERT_EQ(file_size(fd), kDefaultFileSize);
 }
 
 TEST_F(DiskSpaceManagerTest, auto_expand) {
   SetUp("test_auto_expand.db");
-  DatabaseFile file(fd);
 
-  auto original_size = file.get_size();
+  auto original_size = file_size(fd);
 
   header_page_t header_page;
-  file.get_header_page(&header_page);
-  for (int i = 0; i < header_page.num_of_pages; ++i) {
+  file_read_header_page(fd, &header_page);
+  for (int i = 0; i < header_page.header.num_of_pages; ++i) {
     ASSERT_NE(file_alloc_page(fd), 0);
   }
 
   auto expanded_size = original_size * 2;
-  ASSERT_EQ(file.get_size(), expanded_size);
+  ASSERT_EQ(file_size(fd), expanded_size);
   for (int i = 0; i < 1000; ++i) {
     ASSERT_NE(file_alloc_page(fd), 0);
   }

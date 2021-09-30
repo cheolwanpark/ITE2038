@@ -3,7 +3,6 @@ set(DB_SOURCE_DIR src)
 set(DB_SOURCES
   ${DB_SOURCE_DIR}/bpt.cc
   ${DB_SOURCE_DIR}/disk_space_manager/file.cc
-  ${DB_SOURCE_DIR}/disk_space_manager/database_file.cc
   # Add your sources here
   # ${DB_SOURCE_DIR}/foo/bar/your_source.cc
   )
