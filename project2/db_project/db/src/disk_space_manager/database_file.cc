@@ -58,13 +58,42 @@ void DatabaseFile::set_header_page(const header_page_t *page) {
 void DatabaseFile::get_page(pagenum_t id, page_t *page) const {
   lseek(_fd, id, SEEK_SET);
   read(_fd, page, sizeof(page_t));
-  rev64(page->next_free_page);
 }
 
-void DatabaseFile::set_page(pagenum_t id, const page_t *page) {
+void DatabaseFile::set_page(pagenum_t id, const page_t *page, bool sync) {
   lseek(_fd, id, SEEK_SET);
   write(_fd, page, sizeof(page_t));
-  fsync(_fd);
+  if (sync) fsync(_fd);
+}
+
+pagenum_t DatabaseFile::pop_free_page() {
+  header_page_t header_page;
+  this->get_header_page(&header_page);
+  if (header_page.first_free_page == 0) {
+    this->expand_twice();
+    this->get_header_page(&header_page);
+  }
+  auto page_num = header_page.first_free_page;
+  if (page_num == 0) return 0;
+
+  page_list_node_t allocated_page;
+  this->get_page_list_node(page_num, &allocated_page);
+  header_page.first_free_page = allocated_page.next_free_page;
+  this->set_header_page(&header_page);
+
+  return page_num;
+}
+
+void DatabaseFile::push_free_page(pagenum_t id) {
+  header_page_t header_page;
+  page_list_node_t page;
+  this->get_header_page(&header_page);
+  this->get_page_list_node(id, &page);
+
+  page.next_free_page = header_page.first_free_page;
+  header_page.first_free_page = id;
+  this->set_header_page(&header_page);
+  this->set_page_list_node(id, &page);
 }
 
 void DatabaseFile::expand_twice() { this->expand_pages(this->get_size()); }
@@ -81,6 +110,20 @@ int DatabaseFile::get_fd() const { return _fd; }
 
 uint64_t DatabaseFile::get_size() const { return lseek(_fd, 0L, SEEK_END); }
 
+void DatabaseFile::get_page_list_node(pagenum_t id,
+                                      page_list_node_t *page) const {
+  lseek(_fd, id, SEEK_SET);
+  read(_fd, page, sizeof(page_list_node_t));
+  rev64(page->next_free_page);
+}
+
+void DatabaseFile::set_page_list_node(pagenum_t id,
+                                      const page_list_node_t *page, bool sync) {
+  lseek(_fd, id, SEEK_SET);
+  write(_fd, page, sizeof(page_list_node_t));
+  if (sync) fsync(_fd);
+}
+
 void DatabaseFile::create_free_pages(uint64_t start, uint64_t end,
                                      pagenum_t *first_page_num,
                                      pagenum_t *last_page_num,
@@ -90,17 +133,15 @@ void DatabaseFile::create_free_pages(uint64_t start, uint64_t end,
   uint64_t num_of_pages = (end - start) / kPageSize;
 
   pagenum_t current_page_num;
-  page_t page;
+  page_list_node_t page;
   for (int64_t i = 0; i < num_of_pages - 1; ++i) {
     current_page_num = start + i * kPageSize;
     page.next_free_page = current_page_num + kPageSize;
-    lseek(_fd, current_page_num, SEEK_SET);
-    write(_fd, &page, sizeof(page_t));
+    this->set_page_list_node(current_page_num, &page, false);
   }
   current_page_num = page.next_free_page;
   page.next_free_page = 0;
-  lseek(_fd, current_page_num, SEEK_SET);
-  write(_fd, &page, sizeof(page_t));
+  this->set_page_list_node(current_page_num, &page, false);
 
   fsync(_fd);
 
@@ -112,7 +153,7 @@ void DatabaseFile::create_free_pages(uint64_t start, uint64_t end,
 void DatabaseFile::expand(uint64_t size) {
   if (size < 1LLU) return;
   lseek(_fd, size - 1LLU, SEEK_END);
-  uint8_t null_byte = 0;
+  byte null_byte = 0;
   write(_fd, &null_byte, 1);
   lseek(_fd, 0L, SEEK_SET);
   fsync(_fd);
@@ -132,10 +173,10 @@ void DatabaseFile::expand_pages(uint64_t size) {
   this->create_free_pages(start, end, &first_page_num, &last_page_num,
                           &num_new_pages);
 
-  page_t last_page;
-  this->get_page(last_page_num, &last_page);
+  page_list_node_t last_page;
+  this->get_page_list_node(last_page_num, &last_page);
   last_page.next_free_page = header_page.first_free_page;
-  this->set_page(last_page_num, &last_page);
+  this->set_page_list_node(last_page_num, &last_page);
 
   header_page.first_free_page = first_page_num;
   header_page.num_of_pages += num_new_pages;

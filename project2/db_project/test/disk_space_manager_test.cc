@@ -13,7 +13,6 @@ class DiskSpaceManagerTest : public ::testing::Test {
     ASSERT_TRUE(fd > 0);
 
     ASSERT_EQ(sizeof(page_t), kPageSize);
-    ASSERT_EQ(sizeof(header_page_t), kPageSize);
   }
 
   void TearDown() override {
@@ -35,17 +34,6 @@ TEST_F(DiskSpaceManagerTest, open_db_file) {
   header_page_t header_page;
   file.get_header_page(&header_page);
   ASSERT_EQ(header_page.num_of_pages, target_num_pages);
-
-  uint64_t counted_num_pages = 1;
-  pagenum_t next_page = header_page.first_free_page;
-  page_t page;
-  while (next_page != 0) {
-    ++counted_num_pages;
-    file.get_page(next_page, &page);
-    next_page = page.next_free_page;
-    ASSERT_TRUE(counted_num_pages <= target_num_pages);
-  }
-  ASSERT_EQ(counted_num_pages, target_num_pages);
 }
 
 TEST_F(DiskSpaceManagerTest, alloc_dealloc_pages) {

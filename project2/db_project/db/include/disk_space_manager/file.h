@@ -7,11 +7,9 @@ typedef uint64_t pagenum_t;
 typedef char byte;
 
 const uint64_t kPageSize = 4 * 1024;
-const uint64_t kPageDataSize = kPageSize - sizeof(pagenum_t);
 
 struct page_t {
-  pagenum_t next_free_page;
-  byte data[kPageDataSize];
+  byte data[kPageSize];
 };
 
 // functions
