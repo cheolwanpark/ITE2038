@@ -42,6 +42,7 @@ void file_read_header_page(int fd, header_page_t *dest);
 // Write in-memory header page(src) to the on-disk header page
 void file_write_header_page(int fd, const header_page_t *src);
 
+// Calculate file size (byte)
 uint64_t file_size(int fd);
 
 // Stop referencing the database file

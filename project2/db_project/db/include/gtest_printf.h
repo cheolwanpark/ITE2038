@@ -1,6 +1,7 @@
 #ifndef DB_GTEST_PRINTF_H_
 #define DB_GTEST_PRINTF_H_
 
+#include <cstdarg>
 #include <cstdio>
 #include <iostream>
 
