@@ -1,0 +1,9 @@
+version: "3.9"
+services:
+  ubuntu:
+    build: .
+    entrypoint: /bin/bash
+    stdin_open: true
+    tty: true
+    volumes:
+      - ..:/share

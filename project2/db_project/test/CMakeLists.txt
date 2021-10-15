@@ -11,6 +11,8 @@ set(DB_TESTS
   # Add your test files here
   # foo/bar/your_test.cc
   disk_space_manager_test.cc
+  bpt_test.cc
+  index_test.cc
   )
 
 add_executable(db_test ${DB_TESTS})
