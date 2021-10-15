@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <iostream>
 
-#include "disk_space_manager/file.h"
+#include "database.h"
 
 inline void GPRINTF(const char *format, ...) {
   fprintf(stderr, "[          ] [ INFO ] ");
@@ -27,8 +27,8 @@ inline void __log(bool force_exit, const char *severity,
   fprintf(stderr, "\n");
 
   if (force_exit) {
-    file_close_table_files();
-    // exit(-1);
+    shutdown_db();
+    exit(-1);
   }
 }
 
@@ -37,6 +37,6 @@ inline void __log(bool force_exit, const char *severity,
 #define LOG_WARN(format, ...) \
   __log(false, "Warn", __func__, __LINE__, format, ##__VA_ARGS__)
 #define LOG_INFO(format, ...) \
-  // __log(false, "Info", __func__, __LINE__, format, ##__VA_ARGS__)
+  __log(false, "Info", __func__, __LINE__, format, ##__VA_ARGS__)
 
 #endif

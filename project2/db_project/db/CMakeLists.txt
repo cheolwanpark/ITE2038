@@ -1,7 +1,6 @@
 # Sources
 set(DB_SOURCE_DIR src)
 set(DB_SOURCES
-  ${DB_SOURCE_DIR}/bpt.cc
   ${DB_SOURCE_DIR}/disk_space_manager/file.cc
   ${DB_SOURCE_DIR}/index_manager/bpt.cc
   ${DB_SOURCE_DIR}/index_manager/index.cc
@@ -13,7 +12,6 @@ set(DB_SOURCES
 # Headers
 set(DB_HEADER_DIR include)
 set(DB_HEADERS
-  ${DB_HEADER_DIR}/bpt.h
   ${DB_HEADER_DIR}/disk_space_manager/file.h
   ${DB_HEADER_DIR}/log.h
   ${DB_HEADER_DIR}/index_manager/bpt.h
