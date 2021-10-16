@@ -664,21 +664,39 @@ pagenum_t merge_leaf(int64_t table_id, pagenum_t root, bpt_key_t key_in_parent,
   file_read_page(table_id, pagenum, &page.page);
   file_read_page(table_id, neighbor_pagenum, &neighbor.page);
 
-  auto num_of_keys = page.leaf_data.header.num_of_keys;
   auto slots = leaf_slot_array(&page);
-  for (int i = 0; i < num_of_keys; ++i) {
-    if (!insert_into_leaf(&neighbor, slots[i].key, slots[i].size,
-                          page.page.data + slots[i].offset)) {
+  auto neig_slots = leaf_slot_array(&neighbor);
+
+  auto page_is_left = true;
+  auto left_pagenum = pagenum, right_pagenum = neighbor_pagenum;
+  bpt_leaf_page_t *left = &page, *right = &neighbor;
+  auto left_slots = slots, right_slots = neig_slots;
+  if (right_slots[0].key < left_slots[0].key) {
+    std::swap(left_pagenum, right_pagenum);
+    std::swap(left, right);
+    std::swap(left_slots, right_slots);
+    page_is_left = false;
+  }
+  auto left_num_of_keys = left->leaf_data.header.num_of_keys;
+  auto right_num_of_keys = right->leaf_data.header.num_of_keys;
+
+  // copy right page's slots into left page
+  for (int i = 0; i < right_num_of_keys; ++i) {
+    if (!insert_into_leaf(left, right_slots[i].key, right_slots[i].size,
+                          right->page.data + right_slots[i].offset)) {
       LOG_ERR("failed to insert");
       return 0;
     }
   }
 
-  // TODO update right sibling of node who is pointing page
-  auto parent = page.leaf_data.header.parent_page;
-  file_write_page(table_id, neighbor_pagenum, &neighbor.page);
-  file_free_page(table_id, pagenum);
-  return delete_from_parent(table_id, root, parent, key_in_parent, pagenum);
+  // update right sibling
+  left->leaf_data.right_sibling = right->leaf_data.right_sibling;
+
+  // free right page and delete from parent
+  file_write_page(table_id, left_pagenum, &left->page);
+  file_free_page(table_id, right_pagenum);
+  return delete_from_parent(table_id, root, right->leaf_data.header.parent_page,
+                            key_in_parent, right_pagenum);
 }
 
 pagenum_t redistribute_leaf(int64_t table_id, pagenum_t root,

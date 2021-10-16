@@ -53,10 +53,6 @@ int db_delete(int64_t table_id, int64_t key) {
   root = bpt_delete(table_id, root, key);
   if (root == 0) return 1;
   file_read_header_page(table_id, &header);
-  if (root != header.header.root_page_number) {
-    LOG_INFO("root is changed %llu -> %llu", header.header.root_page_number,
-             root);
-  }
   header.header.root_page_number = root != kNullPagenum ? root : 0;
   file_write_header_page(table_id, &header);
 
