@@ -1211,7 +1211,7 @@ pagenum_t bpt_delete(int64_t table_id, pagenum_t root, bpt_key_t key) {
 }
 
 bool is_clean(int64_t table_id, pagenum_t root, pagenum_t parent, bpt_key_t min,
-              bpt_key_t max, bool is_root) {
+              bpt_key_t max, bool is_root, bool is_first_child) {
   if (root == 0) return true;
 
   bpt_page_t page;
@@ -1225,6 +1225,24 @@ bool is_clean(int64_t table_id, pagenum_t root, pagenum_t parent, bpt_key_t min,
   if (page.header.is_leaf) {
     bpt_leaf_page_t leaf;
     file_read_page(table_id, root, &leaf.page);
+    if (is_first_child) {
+      // if first child leaf, then check right sibling correctness
+      bpt_internal_page_t parent;
+      bpt_leaf_page_t current;
+      file_read_page(table_id, leaf.leaf_data.header.parent_page, &parent.page);
+      auto right_sibling = leaf.leaf_data.right_sibling;
+      auto parent_slots = internal_slot_array(&parent);
+      auto parent_num_of_keys = parent.internal_data.header.num_of_keys;
+      for (int i = 0; i < parent_num_of_keys; ++i) {
+        if (parent_slots[i].pagenum != right_sibling) {
+          LOG_ERR("invalid right sibling");
+          return false;
+        }
+        file_read_page(table_id, parent_slots[i].pagenum, &current.page);
+        right_sibling = current.leaf_data.right_sibling;
+      }
+    }
+
     auto num_of_keys = leaf.leaf_data.header.num_of_keys;
     auto slots = leaf_slot_array(&leaf);
     for (int i = 0; i < num_of_keys; ++i) {
@@ -1247,7 +1265,7 @@ bool is_clean(int64_t table_id, pagenum_t root, pagenum_t parent, bpt_key_t min,
 
   if (is_root && num_of_keys == 0) {
     return is_clean(table_id, internal.internal_data.first_child_page, root,
-                    min, max);
+                    min, max, false, true);
   }
 
   if (!is_clean(table_id, internal.internal_data.first_child_page, root, min,
