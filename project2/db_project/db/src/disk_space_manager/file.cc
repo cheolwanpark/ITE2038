@@ -184,7 +184,7 @@ int64_t file_open_table_file(const char* pathname) {
 
   int table_id;
   if (access(pathname, F_OK) != 0) {
-    table_id = open(pathname, O_RDWR | O_CREAT, 0666);
+    table_id = open(pathname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (table_id < 0) {
       LOG_ERR("failed to create and open %s, errno: %s", pathname,
               strerror(errno));
@@ -202,7 +202,7 @@ int64_t file_open_table_file(const char* pathname) {
 
     expand_and_create_pages(table_id, kDefaultFileSize - kPageSize);
   } else {
-    table_id = open(pathname, O_RDWR, 0666);
+    table_id = open(pathname, O_RDWR);
     if (table_id < 0) {
       LOG_ERR("failed to open %s, errno: %s", pathname, strerror(errno));
       return table_id;
