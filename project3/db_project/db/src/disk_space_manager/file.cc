@@ -13,6 +13,9 @@
 
 std::map<std::string, int> table_map;
 
+uint64_t pagenum2offset(pagenum_t pagenum) { return pagenum * kPageSize; }
+pagenum_t offset2pagenum(uint64_t offset) { return offset / kPageSize; }
+
 // internal api functions
 // to preserve interface , Disk Space Manager uses this functions internally
 void __file_read_page(int64_t table_id, pagenum_t pagenum, page_t* dest) {
@@ -20,7 +23,7 @@ void __file_read_page(int64_t table_id, pagenum_t pagenum, page_t* dest) {
     LOG_ERR("invalid parameters", pagenum);
     return;
   }
-  if (lseek(table_id, pagenum, SEEK_SET) < 0) {
+  if (lseek(table_id, pagenum2offset(pagenum), SEEK_SET) < 0) {
     LOG_ERR("cannot seek page %llu", pagenum);
     return;
   }
@@ -35,7 +38,7 @@ void __file_write_page(int64_t table_id, pagenum_t pagenum, const page_t* src) {
     LOG_ERR("invalid parameters", pagenum);
     return;
   }
-  if (lseek(table_id, pagenum, SEEK_SET) < 0) {
+  if (lseek(table_id, pagenum2offset(pagenum), SEEK_SET) < 0) {
     LOG_ERR("cannot seek page %llu", pagenum);
     return;
   }
@@ -53,7 +56,7 @@ void __file_read_header_page(int64_t table_id, header_page_t* dest) {
     LOG_ERR("invalid parameters");
     return;
   }
-  if (lseek(table_id, kHeaderPagenum, SEEK_SET) < 0) {
+  if (lseek(table_id, pagenum2offset(kHeaderPagenum), SEEK_SET) < 0) {
     LOG_ERR("cannot seek header page");
     return;
   }
@@ -68,7 +71,7 @@ void __file_write_header_page(int64_t table_id, const header_page_t* src) {
     LOG_ERR("invalid parameters");
     return;
   }
-  if (lseek(table_id, kHeaderPagenum, SEEK_SET) < 0) {
+  if (lseek(table_id, pagenum2offset(kHeaderPagenum), SEEK_SET) < 0) {
     LOG_ERR("cannot seek header page");
     return;
   }
@@ -96,11 +99,6 @@ uint64_t __file_size(int64_t table_id) {
 }
 
 // utilities used in file.cc (not exported in file.h)
-union page_node_t {
-  page_t page;
-  pagenum_t next_free_page;
-};
-
 // Expand file by size
 void expand(int64_t table_id, uint64_t size) {
   if (size < 1LLU) return;
@@ -124,9 +122,14 @@ void expand(int64_t table_id, uint64_t size) {
 }
 
 // Expand file by size and create page list
-void expand_and_create_pages(int64_t table_id, uint64_t size) {
+void expand_and_create_pages(int64_t table_id, uint64_t size, pagenum_t* first,
+                             pagenum_t* last, uint64_t* num_new_pages) {
   if (table_id < 0 || size % kPageSize != 0 || size < 1LLU) {
     LOG_ERR("cannot expand database file, wrong parameter");
+    return;
+  }
+  if (first == NULL || last == NULL || num_new_pages == NULL) {
+    LOG_ERR("invalid parameters");
     return;
   }
 
@@ -136,27 +139,41 @@ void expand_and_create_pages(int64_t table_id, uint64_t size) {
   auto end = __file_size(table_id);
 
   // create page list
-  pagenum_t first_page_num, last_page_num;
-  uint64_t num_new_pages = (end - start) / kPageSize;
+  *num_new_pages = (end - start) / kPageSize;
 
   pagenum_t current_page_num;
   page_node_t page_node;
-  for (int64_t i = 0; i < num_new_pages - 1; ++i) {
-    current_page_num = start + i * kPageSize;
-    page_node.next_free_page = current_page_num + kPageSize;
+  for (int64_t i = 0; i < *num_new_pages - 1; ++i) {
+    current_page_num = offset2pagenum(start + i * kPageSize);
+    page_node.next_free_page = current_page_num + 1;
     __file_write_page(table_id, current_page_num, &page_node.page);
   }
   current_page_num = page_node.next_free_page;
   page_node.next_free_page = 0;
   __file_write_page(table_id, current_page_num, &page_node.page);
 
-  first_page_num = start;
-  last_page_num = current_page_num;
+  *first = offset2pagenum(start);
+  *last = current_page_num;
+}
+
+// Expand file by size and create page list and connect it to header
+void expand_and_create_pages(int64_t table_id, uint64_t size) {
+  if (table_id < 0 || size % kPageSize != 0 || size < 1LLU) {
+    LOG_ERR("cannot expand database file, wrong parameter");
+    return;
+  }
+
+  // expand and create pages
+  pagenum_t first_page_num, last_page_num;
+  uint64_t num_new_pages;
+  expand_and_create_pages(table_id, size, &first_page_num, &last_page_num,
+                          &num_new_pages);
 
   // connect created list into header
   header_page_t header_page;
   __file_read_header_page(table_id, &header_page);
 
+  page_node_t page_node;
   __file_read_page(table_id, last_page_num, &page_node.page);
   page_node.next_free_page = header_page.header.first_free_page;
   __file_write_page(table_id, last_page_num, &page_node.page);
@@ -213,6 +230,17 @@ int64_t file_open_table_file(const char* pathname) {
   table_map[path_str] = table_id;
 
   return table_id;
+}
+
+int file_expand_twice(int64_t table_id, pagenum_t* start, pagenum_t* end,
+                      uint64_t* num_new_pages) {
+  if (table_id < 0) {
+    LOG_ERR("file descriptor cannot be a negative value");
+    return 1;
+  }
+  expand_and_create_pages(table_id, __file_size(table_id), start, end,
+                          num_new_pages);
+  return 0;
 }
 
 // Allocate an on-disk page from the free page list

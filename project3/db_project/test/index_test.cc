@@ -43,7 +43,7 @@ TEST_F(IndexTest, insert_and_find) {
   };
   uint16_t sizes[kinds] = {50, 70, 100, 112};
 
-  uint32_t inserting_cnt = 1000000;
+  uint32_t inserting_cnt = 100000;
   std::vector<int> keys;
   for (int i = 1; i <= inserting_cnt; ++i) {
     keys.emplace_back(i);
@@ -87,7 +87,7 @@ TEST_F(IndexTest, insert_and_delete_all) {
   };
   uint16_t sizes[kinds] = {50, 70, 100, 112};
 
-  uint32_t inserting_cnt = 1000000;
+  uint32_t inserting_cnt = 100000;
   std::vector<int> keys;
   for (int i = 1; i <= inserting_cnt; ++i) {
     keys.emplace_back(i);
@@ -130,7 +130,7 @@ TEST_F(IndexTest, insert_delete_find) {
   };
   uint16_t sizes[kinds] = {50, 70, 100, 112};
 
-  uint32_t inserting_cnt = 1000000;
+  uint32_t inserting_cnt = 100000;
   std::vector<int> keys;
   for (int i = 1; i <= inserting_cnt; ++i) {
     keys.emplace_back(i);

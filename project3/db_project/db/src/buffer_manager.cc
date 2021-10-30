@@ -29,11 +29,87 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum);
 // return NULL on failed
 frame_t *buffer_evict_frame();
 
+// find specific frame in buffer
+// return NULL on failed
+frame_t *find_frame(int64_t table_id, pagenum_t pagenum);
+
+// make given node a head of the LRU list
 void set_LRU_head(frame_t *node);
+
+// make given node a tail of the LRU list
 void set_LRU_tail(frame_t *node);
 
 // get frame ptr and update LRU list
 frame_t *get_frame(int64_t table_id, pagenum_t pagenum);
+
+// internal api functions
+// to preserve interface , Disk Space Manager uses this functions internally
+const page_t *__buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
+  if (table_id < 0) {
+    LOG_ERR("invalid parameters");
+    return NULL;
+  }
+
+  auto result = find_frame(table_id, pagenum);
+  if (result == NULL) {
+    result = buffer_load_page(table_id, pagenum);
+    if (result == NULL) {
+      LOG_ERR("failed to load page");
+      return NULL;
+    }
+  }
+
+  result->pin_count += 1;
+  set_LRU_head(result);
+
+  return &result->frame;
+}
+
+void __buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
+  if (table_id < 0 || dest == NULL) {
+    LOG_ERR("invalid parameters");
+    return;
+  }
+
+  const page_t *page_ptr = __buffer_get_page_ptr(table_id, pagenum);
+  if (page_ptr == NULL) {
+    LOG_ERR("failed to get page pointer");
+    return;
+  }
+
+  memcpy(dest, page_ptr, sizeof(page_t));
+}
+
+void __buffer_write_page(int64_t table_id, pagenum_t pagenum,
+                         const page_t *src) {
+  if (table_id < 0 || src == NULL) {
+    LOG_ERR("invalid parameters");
+    return;
+  }
+
+  auto frame = find_frame(table_id, pagenum);
+  if (frame == NULL) {
+    LOG_ERR("there is no frame in the buffer");
+    return;
+  }
+  memcpy(&frame->frame, src, sizeof(page_t));
+  frame->is_dirty = true;
+  set_LRU_head(frame);
+}
+
+void __unpin(int64_t table_id, pagenum_t pagenum) {
+  if (table_id < 0) {
+    LOG_ERR("invalid parameters");
+    return;
+  }
+
+  auto frame = find_frame(table_id, pagenum);
+  if (frame == NULL) {
+    LOG_ERR("there is no frame in the buffer");
+    return;
+  }
+  frame->pin_count = std::max(frame->pin_count - 1, 0);
+}
 
 frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0) {
@@ -103,6 +179,11 @@ frame_t *find_frame(int64_t table_id, pagenum_t pagenum) {
 }
 
 void set_LRU_head(frame_t *node) {
+  if (node == NULL) {
+    LOG_ERR("invalid parameters");
+    return;
+  }
+
   if (node->prev != NULL) {    // node is not a head
     if (node->next == NULL) {  // node is a tail
       tail = node->prev;
@@ -126,6 +207,11 @@ void set_LRU_head(frame_t *node) {
 }
 
 void set_LRU_tail(frame_t *node) {
+  if (node == NULL) {
+    LOG_ERR("invalid parameters");
+    return;
+  }
+
   if (node->next != NULL) {    // node is not a tail
     if (node->prev == NULL) {  // node is a head
       head = node->next;
@@ -196,22 +282,50 @@ pagenum_t buffer_alloc_page(int64_t table_id) {
     return 0;
   }
 
-  auto result = file_alloc_page(table_id);
   header_page_t header_page;
-  file_read_header_page(table_id, &header_page);
-  buffer_get_header_page_ptr(table_id);
-  buffer_write_header_page(table_id, &header_page);
-  unpin_header(table_id);
+  __buffer_read_page(table_id, kHeaderPagenum, &header_page.page);
+  if (header_page.header.first_free_page == 0) {
+    pagenum_t start = 0, end = 0;
+    uint64_t num_new_pages = 0;
+    if (file_expand_twice(table_id, &start, &end, &num_new_pages) ||
+        start == 0) {
+      LOG_ERR("failed to expand file");
+      return 0;
+    }
+    // connect expanded list into header page
+    header_page.header.first_free_page = start;
+    header_page.header.num_of_pages += num_new_pages;
+  }
+
+  auto result = header_page.header.first_free_page;
+  page_node_t allocated_page;
+  __buffer_read_page(table_id, result, &allocated_page.page);
+  header_page.header.first_free_page = allocated_page.next_free_page;
+  __unpin(table_id, result);
+
+  __buffer_write_page(table_id, kHeaderPagenum, &header_page.page);
+  __unpin(table_id, kHeaderPagenum);
   return result;
 }
 
 void buffer_free_page(int64_t table_id, pagenum_t pagenum) {
-  file_free_page(table_id, pagenum);
+  if (table_id < 0 || pagenum < 1) {
+    LOG_ERR("invalid parameters");
+    return;
+  }
+
   header_page_t header_page;
-  file_read_header_page(table_id, &header_page);
-  buffer_get_header_page_ptr(table_id);
-  buffer_write_header_page(table_id, &header_page);
-  unpin_header(table_id);
+  page_node_t page_node;
+  __buffer_read_page(table_id, kHeaderPagenum, &header_page.page);
+  __buffer_read_page(table_id, pagenum, &page_node.page);
+
+  page_node.next_free_page = header_page.header.first_free_page;
+  header_page.header.first_free_page = pagenum;
+
+  __buffer_write_page(table_id, kHeaderPagenum, &header_page.page);
+  __buffer_write_page(table_id, pagenum, &page_node.page);
+  __unpin(table_id, kHeaderPagenum);
+  __unpin(table_id, pagenum);
 
   auto freed_frame = find_frame(table_id, pagenum);
   if (freed_frame != NULL) set_LRU_tail(freed_frame);
@@ -222,20 +336,7 @@ const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
     LOG_ERR("invalid parameters");
     return NULL;
   }
-
-  auto result = find_frame(table_id, pagenum);
-  if (result == NULL) {
-    result = buffer_load_page(table_id, pagenum);
-    if (result == NULL) {
-      LOG_ERR("failed to load page");
-      return NULL;
-    }
-  }
-
-  result->pin_count += 1;
-  set_LRU_head(result);
-
-  return &result->frame;
+  return __buffer_get_page_ptr(table_id, pagenum);
 }
 
 const header_page_t *buffer_get_header_page_ptr(int64_t table_id) {
@@ -243,82 +344,61 @@ const header_page_t *buffer_get_header_page_ptr(int64_t table_id) {
     LOG_ERR("invalid parameters");
     return NULL;
   }
-  return (header_page_t *)buffer_get_page_ptr(table_id, 0);
+  return (header_page_t *)__buffer_get_page_ptr(table_id, 0);
 }
 
-int buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
+void buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
   if (table_id < 0 || dest == NULL) {
     LOG_ERR("invalid parameters");
-    return 1;
+    return;
   }
 
-  const page_t *page_ptr = buffer_get_page_ptr(table_id, pagenum);
-  if (page_ptr == NULL) {
-    LOG_ERR("failed to get page pointer");
-    return 1;
-  }
-
-  memcpy(dest, page_ptr, sizeof(page_t));
-  return 0;
+  __buffer_read_page(table_id, pagenum, dest);
 }
 
-int buffer_read_header_page(int64_t table_id, header_page_t *dest) {
+void buffer_read_header_page(int64_t table_id, header_page_t *dest) {
   if (table_id < 0 || dest == NULL) {
     LOG_ERR("invalid parameters");
-    return 1;
+    return;
   }
 
-  return buffer_read_page(table_id, 0, (page_t *)dest);
+  __buffer_read_page(table_id, kHeaderPagenum, (page_t *)dest);
 }
 
-int buffer_write_page(int64_t table_id, pagenum_t pagenum, const page_t *src) {
+void buffer_write_page(int64_t table_id, pagenum_t pagenum, const page_t *src) {
   if (table_id < 0 || src == NULL) {
     LOG_ERR("invalid parameters");
-    return 1;
+    return;
   }
 
-  auto frame = find_frame(table_id, pagenum);
-  if (frame == NULL) {
-    LOG_ERR("there is no frame in the buffer");
-    return 1;
-  }
-  memcpy(&frame->frame, src, sizeof(page_t));
-  frame->is_dirty = true;
-  set_LRU_head(frame);
-  return 0;
+  return __buffer_write_page(table_id, pagenum, src);
 }
 
-int buffer_write_header_page(int64_t table_id, const header_page_t *src) {
+void buffer_write_header_page(int64_t table_id, const header_page_t *src) {
   if (table_id < 0 || src == NULL) {
     LOG_ERR("invalid parameters");
-    return 1;
+    return;
   }
 
-  return buffer_write_page(table_id, 0, (page_t *)src);
+  __buffer_write_page(table_id, kHeaderPagenum, (page_t *)src);
 }
 
-int unpin(int64_t table_id, pagenum_t pagenum) {
+void unpin(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0) {
     LOG_ERR("invalid parameters");
-    return 1;
+    return;
   }
 
-  auto frame = find_frame(table_id, pagenum);
-  if (frame == NULL) {
-    LOG_ERR("there is no frame in the buffer");
-    return 1;
-  }
-  frame->pin_count = std::max(frame->pin_count - 1, 0);
-  return 0;
+  __unpin(table_id, pagenum);
 }
 
-int unpin_header(int64_t table_id) {
+void unpin_header(int64_t table_id) {
   if (table_id < 0) {
     LOG_ERR("invalid parameters");
-    return 1;
+    return;
   }
 
-  return unpin(table_id, 0);
+  __unpin(table_id, kHeaderPagenum);
 }
 
 int count_free_frames() {

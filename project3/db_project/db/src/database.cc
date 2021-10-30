@@ -11,6 +11,7 @@ int init_db(int num_buf) {
 }
 
 int shutdown_db() {
+  free_buffer_manager();
   file_close_table_files();
   return 0;
 }

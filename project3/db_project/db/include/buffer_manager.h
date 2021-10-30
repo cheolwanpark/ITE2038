@@ -22,8 +22,7 @@ void buffer_free_page(int64_t table_id, pagenum_t pagenum);
 // if buffer does not have that page, then load from the disk
 // increase pin count
 // return page pointer(in bufffer) (NULL on failed)
-template <typename T>
-const T *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum);
+const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum);
 
 // return pointer of the header page in the buffer
 // just a wrapper of the buffer_get_page_ptr
@@ -32,29 +31,29 @@ const header_page_t *buffer_get_header_page_ptr(int64_t table_id);
 // read specific page from the buffer and copy it to dest
 // just a wrapper of the buffer_get_page_ptr
 // return 0 on success
-int buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest);
+void buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest);
 
 // read header page from the buffer and copy it to dest
 // just a wrapper of the buffer_read_and_copy
-int buffer_read_header_page(int64_t table_id, header_page_t *dest);
+void buffer_read_header_page(int64_t table_id, header_page_t *dest);
 
 // write specific page in the buffer
 // if buffer does not have that page, failed
 // return 0 on success
-int buffer_write_page(int64_t table_id, pagenum_t pagenum, const page_t *src);
+void buffer_write_page(int64_t table_id, pagenum_t pagenum, const page_t *src);
 
 // write header page in the buffer
 // just a wrapper of the buffer_write_page
-int buffer_write_header_page(int64_t table_id, const header_page_t *src);
+void buffer_write_header_page(int64_t table_id, const header_page_t *src);
 
 // unpin(decrease pin count) specific page in the buffer
 // if buffer does not have that page, failed
 // return 0 on success
-int unpin(int64_t table_id, pagenum_t pagenum);
+void unpin(int64_t table_id, pagenum_t pagenum);
 
 // unpin(decrease pin count) header page in the buffer
 // just a wrapper of unpin
-int unpin_header(int64_t table_id);
+void unpin_header(int64_t table_id);
 
 // for debug purpose
 // count not pinned frames
