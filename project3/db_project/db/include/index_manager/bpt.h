@@ -2,9 +2,6 @@
 #define DB_BPT_PAGE_H_
 
 #include "buffer_manager.h"
-// #include "disk_space_manager/file.h"
-
-// this functions should be used in index_manager/index.h and test only
 
 // key type
 typedef int64_t bpt_key_t;

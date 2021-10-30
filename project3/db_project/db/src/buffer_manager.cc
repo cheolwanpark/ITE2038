@@ -29,6 +29,10 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum);
 // return NULL on failed
 frame_t *buffer_evict_frame();
 
+// get frame ptr (if there is no corresponding frame in buffer then load it)
+// return NULL on failed
+const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum);
+
 // find specific frame in buffer
 // return NULL on failed
 frame_t *find_frame(int64_t table_id, pagenum_t pagenum);
@@ -44,34 +48,13 @@ frame_t *get_frame(int64_t table_id, pagenum_t pagenum);
 
 // internal api functions
 // to preserve interface , Disk Space Manager uses this functions internally
-const page_t *__buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
-  if (table_id < 0) {
-    LOG_ERR("invalid parameters");
-    return NULL;
-  }
-
-  auto result = find_frame(table_id, pagenum);
-  if (result == NULL) {
-    result = buffer_load_page(table_id, pagenum);
-    if (result == NULL) {
-      LOG_ERR("failed to load page");
-      return NULL;
-    }
-  }
-
-  result->pin_count += 1;
-  set_LRU_head(result);
-
-  return &result->frame;
-}
-
 void __buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
   if (table_id < 0 || dest == NULL) {
     LOG_ERR("invalid parameters");
     return;
   }
 
-  const page_t *page_ptr = __buffer_get_page_ptr(table_id, pagenum);
+  const page_t *page_ptr = buffer_get_page_ptr(table_id, pagenum);
   if (page_ptr == NULL) {
     LOG_ERR("failed to get page pointer");
     return;
@@ -162,6 +145,27 @@ frame_t *buffer_evict_frame() {
   iter->is_dirty = false;
   iter->pin_count = 0;
   return iter;
+}
+
+const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
+  if (table_id < 0) {
+    LOG_ERR("invalid parameters");
+    return NULL;
+  }
+
+  auto result = find_frame(table_id, pagenum);
+  if (result == NULL) {
+    result = buffer_load_page(table_id, pagenum);
+    if (result == NULL) {
+      LOG_ERR("failed to load page");
+      return NULL;
+    }
+  }
+
+  result->pin_count += 1;
+  set_LRU_head(result);
+
+  return &result->frame;
 }
 
 frame_t *find_frame(int64_t table_id, pagenum_t pagenum) {
@@ -329,22 +333,6 @@ void buffer_free_page(int64_t table_id, pagenum_t pagenum) {
 
   auto freed_frame = find_frame(table_id, pagenum);
   if (freed_frame != NULL) set_LRU_tail(freed_frame);
-}
-
-const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
-  if (table_id < 0) {
-    LOG_ERR("invalid parameters");
-    return NULL;
-  }
-  return __buffer_get_page_ptr(table_id, pagenum);
-}
-
-const header_page_t *buffer_get_header_page_ptr(int64_t table_id) {
-  if (table_id < 0) {
-    LOG_ERR("invalid parameters");
-    return NULL;
-  }
-  return (header_page_t *)__buffer_get_page_ptr(table_id, 0);
 }
 
 void buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {

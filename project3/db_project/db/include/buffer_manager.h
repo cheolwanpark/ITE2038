@@ -18,16 +18,6 @@ pagenum_t buffer_alloc_page(int64_t table_id);
 // free page
 void buffer_free_page(int64_t table_id, pagenum_t pagenum);
 
-// return pointer of the specific page in the buffer
-// if buffer does not have that page, then load from the disk
-// increase pin count
-// return page pointer(in bufffer) (NULL on failed)
-const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum);
-
-// return pointer of the header page in the buffer
-// just a wrapper of the buffer_get_page_ptr
-const header_page_t *buffer_get_header_page_ptr(int64_t table_id);
-
 // read specific page from the buffer and copy it to dest
 // just a wrapper of the buffer_get_page_ptr
 // return 0 on success
