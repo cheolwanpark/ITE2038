@@ -72,7 +72,7 @@ void __buffer_write_page(int64_t table_id, pagenum_t pagenum,
 
   auto frame = find_frame(table_id, pagenum);
   if (frame == NULL) {
-    LOG_ERR("there is no frame in the buffer");
+    LOG_WARN("there is no frame in the buffer");
     return;
   }
   memcpy(&frame->frame, src, sizeof(page_t));
@@ -88,7 +88,7 @@ void __unpin(int64_t table_id, pagenum_t pagenum) {
 
   auto frame = find_frame(table_id, pagenum);
   if (frame == NULL) {
-    LOG_ERR("there is no frame in the buffer");
+    LOG_WARN("there is no frame in the buffer");
     return;
   }
   frame->pin_count = std::max(frame->pin_count - 1, 0);

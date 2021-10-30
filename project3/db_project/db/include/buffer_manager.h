@@ -6,6 +6,7 @@
 #include "disk_space_manager/file.h"
 
 // initialize buffer manager
+// return 0 on success
 int init_buffer_manager(int num_buf);
 
 // free buffer manager
@@ -38,7 +39,6 @@ void buffer_write_header_page(int64_t table_id, const header_page_t *src);
 
 // unpin(decrease pin count) specific page in the buffer
 // if buffer does not have that page, failed
-// return 0 on success
 void unpin(int64_t table_id, pagenum_t pagenum);
 
 // unpin(decrease pin count) header page in the buffer
