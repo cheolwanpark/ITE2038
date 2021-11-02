@@ -1,6 +1,7 @@
 #include "buffer_manager.h"
 
 #include <algorithm>
+#include <string.h>
 #include <map>
 
 #include "log.h"
