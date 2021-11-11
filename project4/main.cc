@@ -8,8 +8,8 @@
 #define TRANSFER_THREAD_NUMBER (10)
 #define SCAN_THREAD_NUMBER (3)
 
-#define TRANSFER_COUNT (1000000)
-#define SCAN_COUNT (100000)
+#define TRANSFER_COUNT (100000)
+#define SCAN_COUNT (10000)
 
 #define TABLE_NUMBER (3)
 #define RECORD_NUMBER (5)
@@ -158,5 +158,6 @@ int main() {
     pthread_join(scan_threads[i], NULL);
   }
 
+  free_lock_table();
   return 0;
 }
