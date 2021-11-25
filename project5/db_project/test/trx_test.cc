@@ -10,13 +10,13 @@
 #include "index_manager/index.h"
 #include "log.h"
 
-const int TRANSFER_COUNT = 10000;
+const int TRANSFER_COUNT = 1000;
 const int SCAN_COUNT = 300;
-const int TRANSFER_THREAD_NUM = 10;
-const int SCAN_THREAD_NUM = 7;
+const int TRANSFER_THREAD_NUM = 5;
+const int SCAN_THREAD_NUM = 2;
 
 const long long TABLE_NUMBER = 3;
-const long long RECORD_NUMBER = 10000;
+const long long RECORD_NUMBER = 1000;
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
 const long long SUM_MONEY = TABLE_NUMBER * RECORD_NUMBER * INITIAL_MONEY;

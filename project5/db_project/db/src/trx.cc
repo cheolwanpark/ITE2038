@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <unordered_map>
 
@@ -63,6 +64,10 @@ int is_deadlock(lock_t *lock);
 
 // mutexes
 pthread_mutex_t trx_table_latch = PTHREAD_MUTEX_INITIALIZER;
+#ifdef __unix__
+#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER \
+  PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+#endif
 pthread_mutex_t lock_table_latch = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
 
 // Transaction API relevent code
