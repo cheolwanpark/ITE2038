@@ -10,7 +10,7 @@
 #include "index_manager/index.h"
 #include "log.h"
 
-const int TRANSFER_COUNT = 1000;
+const int TRANSFER_COUNT = 5000;
 const int SCAN_COUNT = 300;
 const int TRANSFER_THREAD_NUM = 5;
 const int SCAN_THREAD_NUM = 2;
@@ -64,13 +64,13 @@ void __transfer_thread_func(void *arg) {
     dest_record_id = rand() % RECORD_NUMBER;
 
     // avoid transfer to same account
-    // if (src_table_id == dest_table_id && src_record_id == dest_record_id)
-    //   continue;
+    if (src_table_id == dest_table_id && src_record_id == dest_record_id)
+      continue;
 
-    // deadlock prevention
-    if (src_table_id > dest_table_id) std::swap(src_table_id, dest_table_id);
-    if (src_record_id > dest_record_id)
-      std::swap(src_record_id, dest_record_id);
+    // // deadlock prevention
+    // if (src_table_id > dest_table_id) std::swap(src_table_id, dest_table_id);
+    // if (src_record_id > dest_record_id)
+    //   std::swap(src_record_id, dest_record_id);
 
     money_transferred = rand() % MAX_MONEY_TRANSFERRED;
     money_transferred =
@@ -136,6 +136,7 @@ void __scan_thread_func(void *arg) {
         }
         sum_money += acc.money;
       }
+      if (aborted) break;
     }
     if (failed) {
       return;
