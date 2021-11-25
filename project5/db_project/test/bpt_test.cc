@@ -15,7 +15,7 @@ class BptTest : public ::testing::Test {
  protected:
   void SetUp(const char *filename) {
     _filename = filename;
-    init_db(100);
+    init_db(3);
     table_id = file_open_table_file(_filename);
     ASSERT_TRUE(table_id > 0);
     root = 0;

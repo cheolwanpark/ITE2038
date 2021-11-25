@@ -13,7 +13,7 @@ struct frame_t {
   int64_t table_id;
   pagenum_t page_num;
   int8_t is_dirty;
-  int16_t pin_count;
+  pthread_mutex_t page_latch;
   frame_t *next;
   frame_t *prev;
 };
@@ -24,6 +24,7 @@ frame_map_t frame_map;
 frame_t *frames = NULL, *head = NULL, *tail = NULL;
 
 pthread_mutex_t buffer_manager_latch = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t frame_map_latch = PTHREAD_MUTEX_INITIALIZER;
 
 // load page into buffer
 // return loaded frame ptr (NULL on failed)
@@ -77,12 +78,12 @@ void __buffer_write_page(int64_t table_id, pagenum_t pagenum,
 
   auto frame = find_frame(table_id, pagenum);
   if (frame == NULL) {
-    LOG_WARN("there is no frame in the buffer");
+    LOG_WARN("there is no frame with key=(%lld %llu) in the buffer", table_id,
+             pagenum);
     return;
   }
   memcpy(&frame->frame, src, sizeof(page_t));
   frame->is_dirty = true;
-  set_LRU_head(frame);
 }
 
 void __unpin(int64_t table_id, pagenum_t pagenum) {
@@ -91,12 +92,16 @@ void __unpin(int64_t table_id, pagenum_t pagenum) {
     return;
   }
 
-  auto frame = find_frame(table_id, pagenum);
+  auto *frame = find_frame(table_id, pagenum);
   if (frame == NULL) {
-    LOG_WARN("there is no frame in the buffer");
+    LOG_WARN("there is no frame with key=(%lld %llu) in the buffer", table_id,
+             pagenum);
     return;
   }
-  frame->pin_count = std::max(frame->pin_count - 1, 0);
+  if (pthread_mutex_unlock(&frame->page_latch)) {
+    LOG_ERR("failed to unlock page latch");
+    return;
+  }
 }
 
 frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
@@ -105,6 +110,7 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
     return NULL;
   }
 
+  // buffer_manager_latch is already locked in buffer_get_page_ptr
   frame_t *frame = buffer_evict_frame();
   if (frame == NULL) {
     LOG_ERR("failed to evict frame");
@@ -116,19 +122,26 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
 
   // push to frame_map
   auto frame_id = std::make_pair(table_id, pagenum);
-  frame_map.insert(std::make_pair(frame_id, frame));
-
+  pthread_mutex_lock(&frame_map_latch);
+  auto res = frame_map.emplace(frame_id, frame);
+  if (!res.second) {
+    pthread_mutex_unlock(&frame_map_latch);
+    LOG_ERR("failed to emplace into the frame map");
+    return NULL;
+  }
+  pthread_mutex_unlock(&frame_map_latch);
   return frame;
 }
 
 frame_t *buffer_evict_frame() {
   // find evict page
+  // buffer_manager_latch is already locked in buffer_get_page_ptr
   auto iter = tail;
   while (iter != NULL) {
-    if (iter->pin_count > 0)
-      iter = iter->prev;
-    else
+    if (pthread_mutex_trylock(&iter->page_latch) == 0)
       break;
+    else
+      iter = iter->prev;
   }
   if (iter == NULL) {
     LOG_ERR("all buffer frame is pinned, cannot evict frame");
@@ -142,13 +155,15 @@ frame_t *buffer_evict_frame() {
 
   // remove from frame_map
   auto frame_id = std::make_pair(iter->table_id, iter->page_num);
+  pthread_mutex_lock(&frame_map_latch);
   frame_map.erase(frame_id);
+  pthread_mutex_unlock(&frame_map_latch);
 
   // reset frame data
   iter->table_id = -1;
   iter->page_num = 0;
   iter->is_dirty = false;
-  iter->pin_count = 0;
+  pthread_mutex_unlock(&iter->page_latch);
   return iter;
 }
 
@@ -158,17 +173,23 @@ const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
     return NULL;
   }
 
+  pthread_mutex_lock(&buffer_manager_latch);
   auto result = find_frame(table_id, pagenum);
   if (result == NULL) {
     result = buffer_load_page(table_id, pagenum);
     if (result == NULL) {
+      pthread_mutex_unlock(&buffer_manager_latch);
       LOG_ERR("failed to load page");
       return NULL;
     }
   }
 
-  result->pin_count += 1;
   set_LRU_head(result);
+  if (pthread_mutex_lock(&result->page_latch)) {
+    LOG_ERR("failed to lock page latch");
+    return NULL;
+  }
+  pthread_mutex_unlock(&buffer_manager_latch);
 
   return &result->frame;
 }
@@ -180,11 +201,15 @@ frame_t *find_frame(int64_t table_id, pagenum_t pagenum) {
   }
 
   auto frame_id = std::make_pair(table_id, pagenum);
+  pthread_mutex_lock(&frame_map_latch);
   auto search = frame_map.find(frame_id);
-  if (search != frame_map.end())
+  if (search != frame_map.end()) {
+    pthread_mutex_unlock(&frame_map_latch);
     return search->second;
-  else
+  } else {
+    pthread_mutex_unlock(&frame_map_latch);
     return NULL;
+  }
 }
 
 void set_LRU_head(frame_t *node) {
@@ -193,7 +218,7 @@ void set_LRU_head(frame_t *node) {
     return;
   }
 
-  pthread_mutex_lock(&buffer_manager_latch);
+  // buffer_manager_latch is already locked in buffer_get_page_ptr
   if (node->prev != NULL) {    // node is not a head
     if (node->next == NULL) {  // node is a tail
       tail = node->prev;
@@ -214,7 +239,6 @@ void set_LRU_head(frame_t *node) {
     }
   }
   // if node is head, then do nothing
-  pthread_mutex_unlock(&buffer_manager_latch);
 }
 
 void set_LRU_tail(frame_t *node) {
@@ -223,7 +247,7 @@ void set_LRU_tail(frame_t *node) {
     return;
   }
 
-  pthread_mutex_lock(&buffer_manager_latch);
+  // buffer_manager_latch is already locked in buffer_free_page
   if (node->next != NULL) {    // node is not a tail
     if (node->prev == NULL) {  // node is a head
       head = node->next;
@@ -244,7 +268,6 @@ void set_LRU_tail(frame_t *node) {
     }
   }
   // if node is tail, then do nothing
-  pthread_mutex_unlock(&buffer_manager_latch);
 }
 
 int init_buffer_manager(int num_buf) {
@@ -268,7 +291,7 @@ int init_buffer_manager(int num_buf) {
     frames[i].table_id = -1;
     frames[i].page_num = 0;
     frames[i].is_dirty = false;
-    frames[i].pin_count = 0;
+    frames[i].page_latch = PTHREAD_MUTEX_INITIALIZER;
     frames[i].next = i + 1 < num_buf ? &frames[i + 1] : NULL;
     frames[i].prev = i - 1 < 0 ? NULL : &frames[i - 1];
   }
@@ -283,11 +306,18 @@ int free_buffer_manager() {
   for (auto iter = head; iter != NULL; iter = iter->next) {
     if (iter->is_dirty)
       file_write_page(iter->table_id, iter->page_num, &iter->frame);
+    if (pthread_mutex_destroy(&iter->page_latch)) {
+      pthread_mutex_unlock(&buffer_manager_latch);
+      LOG_ERR("failed to destroy page latch");
+      return 0;
+    }
   }
 
   // free resources
   if (frames != NULL) free(frames);
+  pthread_mutex_lock(&frame_map_latch);
   frame_map.clear();
+  pthread_mutex_unlock(&frame_map_latch);
   pthread_mutex_unlock(&buffer_manager_latch);
   return 0;
 }
@@ -305,6 +335,7 @@ pagenum_t buffer_alloc_page(int64_t table_id) {
     uint64_t num_new_pages = 0;
     if (file_expand_twice(table_id, &start, &end, &num_new_pages) ||
         start == 0) {
+      __unpin(table_id, kHeaderPagenum);
       LOG_ERR("failed to expand file");
       return 0;
     }
@@ -343,8 +374,10 @@ void buffer_free_page(int64_t table_id, pagenum_t pagenum) {
   __unpin(table_id, kHeaderPagenum);
   __unpin(table_id, pagenum);
 
+  pthread_mutex_lock(&buffer_manager_latch);
   auto freed_frame = find_frame(table_id, pagenum);
   if (freed_frame != NULL) set_LRU_tail(freed_frame);
+  pthread_mutex_unlock(&buffer_manager_latch);
 }
 
 void buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
@@ -402,9 +435,14 @@ void unpin_header(int64_t table_id) {
 }
 
 int count_free_frames() {
+  pthread_mutex_lock(&buffer_manager_latch);
   int result = 0;
   for (auto iter = head; iter != NULL; iter = iter->next) {
-    if (iter->pin_count == 0) ++result;
+    if (pthread_mutex_trylock(&iter->page_latch) == 0) {
+      ++result;
+      pthread_mutex_unlock(&iter->page_latch);
+    }
   }
+  pthread_mutex_unlock(&buffer_manager_latch);
   return result;
 }

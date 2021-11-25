@@ -1210,6 +1210,12 @@ bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return false;
 
+  if (trx_id > 0) {  // acquire record lock before getting page latch
+    auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, S_LOCK);
+    if (lock == NULL) {
+      return false;
+    }
+  }
   bpt_leaf_page_t page;
   buffer_read_page(table_id, leaf_pagenum, &page.page);
 
@@ -1217,14 +1223,6 @@ bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
   auto num_of_keys = page.leaf_data.header.num_of_keys;
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
-      if (trx_id > 0) {
-        auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, S_LOCK);
-        if (lock == NULL) {
-          unpin(table_id, leaf_pagenum);
-          LOG_ERR("failed to acquire S lock");
-          return false;
-        }
-      }
       if (size != NULL) *size = slots[i].size;
       if (value != NULL)
         memcpy(value, page.page.data + slots[i].offset, slots[i].size);
@@ -1241,6 +1239,12 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return false;
 
+  if (trx_id > 0) {  // acquire record lock before getting page latch
+    auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, X_LOCK);
+    if (lock == NULL) {
+      return false;
+    }
+  }
   bpt_leaf_page_t page;
   buffer_read_page(table_id, leaf_pagenum, &page.page);
 
@@ -1248,13 +1252,11 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
   auto num_of_keys = page.leaf_data.header.num_of_keys;
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
-      if (trx_id > 0) {
-        auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, X_LOCK);
-        if (lock == NULL) {
-          unpin(table_id, leaf_pagenum);
-          LOG_ERR("failed to acquire X lock");
-          return false;
-        }
+      if (trx_id > 0 &&
+          trx_log_update(trx_id, table_id, leaf_pagenum, slots[i].offset,
+                         new_val_size, page.page.data + slots[i].offset)) {
+        LOG_ERR("failed to make update log on trx");
+        return false;
       }
       if (old_val_size != NULL) *old_val_size = slots[i].size;
       if (value != NULL) {

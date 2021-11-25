@@ -2,6 +2,7 @@
 set(DB_SOURCE_DIR src)
 set(DB_SOURCES
   ${DB_SOURCE_DIR}/disk_space_manager/file.cc
+  ${DB_SOURCE_DIR}/log.cc
   ${DB_SOURCE_DIR}/index_manager/bpt.cc
   ${DB_SOURCE_DIR}/index_manager/index.cc
   ${DB_SOURCE_DIR}/database.cc

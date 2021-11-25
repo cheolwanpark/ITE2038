@@ -11,21 +11,20 @@
 #include "log.h"
 
 const int TRANSFER_COUNT = 10000;
-const int SCAN_COUNT = 1000;
+const int SCAN_COUNT = 300;
 const int TRANSFER_THREAD_NUM = 10;
-const int SCAN_THREAD_NUM = 10;
+const int SCAN_THREAD_NUM = 7;
 
-const int TABLE_NUMBER = 1;
-const int RECORD_NUMBER = 5;
-const int INITIAL_MONEY = 100000;
+const long long TABLE_NUMBER = 3;
+const long long RECORD_NUMBER = 10000;
+const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
 const long long SUM_MONEY = TABLE_NUMBER * RECORD_NUMBER * INITIAL_MONEY;
 
 class TrxTest : public ::testing::Test {
  protected:
   void SetUp(const char *filename) {
-    init_db(100000);
-    LOG_INFO("init db complete");
+    init_db(10000);
     for (int i = 0; i < TABLE_NUMBER; ++i) {
       sprintf(_filename[i], "%d_%s", i, filename);
       table_id[i] = file_open_table_file(_filename[i]);
@@ -65,8 +64,8 @@ void __transfer_thread_func(void *arg) {
     dest_record_id = rand() % RECORD_NUMBER;
 
     // avoid transfer to same account
-    if (src_table_id == dest_table_id && src_record_id == dest_record_id)
-      continue;
+    // if (src_table_id == dest_table_id && src_record_id == dest_record_id)
+    //   continue;
 
     // deadlock prevention
     if (src_table_id > dest_table_id) std::swap(src_table_id, dest_table_id);
@@ -78,48 +77,38 @@ void __transfer_thread_func(void *arg) {
         rand() % 2 == 0 ? -money_transferred : money_transferred;
 
     auto trx = trx_begin();
-    LOG_INFO("beg trx %d", trx);
     account_t acc1, acc2;
     uint16_t size;
 
-    LOG_INFO("try S lock (%lld %lld) on transfer", src_table_id, src_record_id);
-    ASSERT_EQ(db_find(src_table_id, src_record_id, acc1.data, &size, trx), 0);
+    if (db_find(src_table_id, src_record_id, acc1.data, &size, trx)) continue;
     ASSERT_EQ(size, sizeof(acc1));
-    LOG_INFO("S lock (%lld %lld) on transfer money = %d", src_table_id,
-             src_record_id, acc1.money);
 
-    LOG_INFO("try X lock (%lld %lld) on transfer", src_table_id, src_record_id);
     acc1.money -= money_transferred;
-    ASSERT_EQ(db_update(src_table_id, src_record_id, acc1.data, sizeof(acc1),
-                        &size, trx),
-              0);
+    if (db_update(src_table_id, src_record_id, acc1.data, sizeof(acc1), &size,
+                  trx))
+      continue;
     ASSERT_EQ(size, sizeof(acc1));
-    LOG_INFO("X lock (%lld %lld) on transfer money = %d", src_table_id,
-             src_record_id, acc1.money);
 
-    LOG_INFO("try S lock (%lld %lld) on transfer", dest_table_id,
-             dest_record_id);
-    ASSERT_EQ(db_find(dest_table_id, dest_record_id, acc2.data, &size, trx), 0);
+    if (db_find(dest_table_id, dest_record_id, acc2.data, &size, trx)) continue;
     ASSERT_EQ(size, sizeof(acc2));
-    LOG_INFO("S lock (%lld %lld) on transfer money = %d", dest_table_id,
-             dest_record_id, acc2.money);
 
-    LOG_INFO("try X lock (%lld %lld) on transfer", dest_table_id,
-             dest_record_id);
     acc2.money += money_transferred;
-    ASSERT_EQ(db_update(dest_table_id, dest_record_id, acc2.data, sizeof(acc2),
-                        &size, trx),
-              0);
+    if (db_update(dest_table_id, dest_record_id, acc2.data, sizeof(acc2), &size,
+                  trx))
+      continue;
     ASSERT_EQ(size, sizeof(acc2));
-    LOG_INFO("X lock (%lld %lld) on transfer money = %d", dest_table_id,
-             dest_record_id, acc2.money);
 
-    ASSERT_EQ(trx_commit(trx), trx);
-    LOG_INFO("commit trx %d", trx);
-
+    if (rand() % 2)
+      ASSERT_EQ(trx_commit(trx), trx);
+    else {
+      ASSERT_EQ(trx_abort(trx), trx);
+    }
     if (failed) {
       return;
     }
+
+    if ((i + 1) % 1000 == 0)
+      LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
   }
   GPRINTF("Transfer thread is done.");
 }
@@ -136,29 +125,29 @@ void __scan_thread_func(void *arg) {
   for (int scan = 0; scan < SCAN_COUNT; ++scan) {
     long long sum_money = 0;
     auto trx = trx_begin();
-    // LOG_INFO("\t\t\t\t\t\t\tbeg trx %d", trx);
+    int aborted = false;
     for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
       for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
         account_t acc;
         uint16_t size;
-        // LOG_INFO("\t\t\t\t\t\t\ttry S lock (%lld %lld) on scan",
-        // table_id[tid],
-        //  rid);
-        ASSERT_EQ(db_find(table_id[tid], rid, acc.data, &size, trx), 0);
-        // LOG_INFO("\t\t\t\t\t\t\tS lock (%lld %lld) on scan money = %d",
-        //          table_id[tid], rid, acc.money);
+        if (db_find(table_id[tid], rid, acc.data, &size, trx)) {
+          aborted = true;
+          break;
+        }
         sum_money += acc.money;
       }
     }
     if (failed) {
       return;
     }
-    ASSERT_EQ(trx_commit(trx), trx);
-    // if ((scan + 1) % 10 == 0) LOG_INFO("%dth scan done", scan + 1);
-    // LOG_INFO("\t\t\t\t\t\t\tcommit trx %d", trx);
-    if (sum_money != SUM_MONEY) failed = true;
-    ASSERT_EQ(sum_money, SUM_MONEY)
-        << "Inconsistent state is detected in " << scan + 1 << "th scan!!";
+    if (!aborted) {
+      ASSERT_EQ(trx_commit(trx), trx);
+      if (sum_money != SUM_MONEY) failed = true;
+      ASSERT_EQ(sum_money, SUM_MONEY)
+          << "Inconsistent state is detected in " << scan + 1 << "th scan!!";
+    }
+    if ((scan + 1) % 100 == 0)
+      LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
   }
   GPRINTF("Scan thread is done.");
 }

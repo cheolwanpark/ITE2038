@@ -10,6 +10,8 @@ using trx_id_t = int;
 int trx_begin();
 int trx_commit(trx_id_t trx_id);
 int trx_abort(trx_id_t trx_id);
+int trx_log_update(trx_id_t trx_id, int64_t table_id, pagenum_t page_id,
+                   uint16_t offset, uint16_t len, const byte* bef);
 
 // APIs for locking
 struct lock_t;

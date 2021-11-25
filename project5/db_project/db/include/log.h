@@ -7,30 +7,12 @@
 
 #include "database.h"
 
-inline void GPRINTF(const char *format, ...) {
-  fprintf(stderr, "[          ] [ INFO ] ");
-  va_list args;
-  va_start(args, format);
-  vfprintf(stderr, format, args);
-  va_end(args);
-  fprintf(stderr, "\n");
-}
+#define NTHREAD_ALIGN
 
-inline void __log(bool force_exit, const char *severity,
-                  const char *function_name, int line, const char *format,
-                  ...) {
-  fprintf(stderr, "[%s] [%s] [line %d]: ", severity, function_name, line);
-  va_list args;
-  va_start(args, format);
-  vfprintf(stderr, format, args);
-  va_end(args);
-  fprintf(stderr, "\n");
+void GPRINTF(const char *format, ...);
 
-  if (force_exit) {
-    shutdown_db();
-    exit(-1);
-  }
-}
+void __log(bool force_exit, const char *severity, const char *function_name,
+           int line, const char *format, ...);
 
 #define LOG_ERR(format, ...) \
   __log(false, "Error", __func__, __LINE__, format, ##__VA_ARGS__)
