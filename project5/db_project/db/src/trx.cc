@@ -431,9 +431,14 @@ int lock_release(lock_t *lock_obj) {
   destroy_lock(lock_obj);
   while (iter != NULL) {
     if (iter->record_id == rid) {
-      pthread_cond_signal(&iter->cond);
-      // locks behind the X lock are conflicting with this X lock
-      if (iter->lock_mode == X_LOCK) break;
+      if (iter->lock_mode == S_LOCK) {
+        pthread_cond_signal(&iter->cond);
+      } else {
+        if (find_conflicting_lock(iter) == NULL)
+          pthread_cond_signal(&iter->cond);
+        // locks behind the X lock are conflicting with this X lock
+        break;
+      }
     }
     iter = iter->next;
   }
@@ -452,8 +457,10 @@ int is_conflicting(lock_t *a, lock_t *b) {
     return false;
   }
 
-  if (a->record_id == b->record_id && a->owner_trx != b->owner_trx &&
-      (a->lock_mode == X_LOCK || b->lock_mode == X_LOCK))
+  if (a->record_id != b->record_id) return false;
+  if (a->owner_trx->id == b->owner_trx->id) return false;
+
+  if (a->lock_mode == X_LOCK || b->lock_mode == X_LOCK)
     return true;
   else
     return false;
@@ -496,7 +503,7 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
     auto *iter = sentinel->head;
     while (iter != NULL && iter != trx_lock_iter) {
       if (is_conflicting(iter, trx_lock_iter)) {
-        if (iter->owner_trx == checking_trx) {
+        if (iter->owner_trx->id == checking_trx->id) {
           return true;
         } else if (is_deadlock(checking_trx, iter->owner_trx))
           return true;

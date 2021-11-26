@@ -18,9 +18,9 @@ const long long TABLE_NUMBER = 3;
 const long long RECORD_NUMBER = 2000;
 
 const int TRANSFER_COUNT = 5000;
-const int SCAN_COUNT = 300;
-const int TRANSFER_THREAD_NUM = 4;
-const int SCAN_THREAD_NUM = 3;
+const int SCAN_COUNT = 200;
+const int TRANSFER_THREAD_NUM = 10;
+const int SCAN_THREAD_NUM = 2;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -275,7 +275,7 @@ TEST_F(TrxTest, s_lock_only) {
 }
 
 // X lock only test
-const int UPDATING_THREAD_NUM = 30;
+const int UPDATING_THREAD_NUM = 100;
 const int UPDATING_COUNT = 1000;
 
 void __updating_func(void *arg) {
