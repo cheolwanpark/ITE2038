@@ -5,18 +5,23 @@
 #include <stdlib.h>
 
 #include <algorithm>
+#include <random>
+#include <set>
+#include <string>
+#include <vector>
 
 #include "database.h"
 #include "index_manager/index.h"
 #include "log.h"
 
+const long long TABLE_NUMBER = 3;
+const long long RECORD_NUMBER = 2000;
+
 const int TRANSFER_COUNT = 5000;
 const int SCAN_COUNT = 300;
-const int TRANSFER_THREAD_NUM = 5;
-const int SCAN_THREAD_NUM = 2;
+const int TRANSFER_THREAD_NUM = 4;
+const int SCAN_THREAD_NUM = 3;
 
-const long long TABLE_NUMBER = 3;
-const long long RECORD_NUMBER = 1000;
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
 const long long SUM_MONEY = TABLE_NUMBER * RECORD_NUMBER * INITIAL_MONEY;
@@ -43,6 +48,7 @@ class TrxTest : public ::testing::Test {
   int64_t table_id[TABLE_NUMBER];
 };
 
+// Bank account test (mixed locks)
 union account_t {
   long long money;
   char data[100];
@@ -158,8 +164,8 @@ void *scan_thread_func(void *arg) {
   return NULL;
 }
 
-TEST_F(TrxTest, multi_thread) {
-  SetUp("TT_multi_thread_test.db");
+TEST_F(TrxTest, mixed) {
+  SetUp("TT_mixed_test.db");
   pthread_t transfer_threads[TRANSFER_THREAD_NUM];
   pthread_t scan_threads[SCAN_THREAD_NUM];
 
@@ -188,6 +194,139 @@ TEST_F(TrxTest, multi_thread) {
   }
   for (int i = 0; i < SCAN_THREAD_NUM; ++i) {
     pthread_join(scan_threads[i], NULL);
+  }
+  GPRINTF("complete!");
+}
+
+// S lock only test
+const int SCANNING_THREAD_NUM = 100;
+const int SCANNING_COUNT = 30;
+const int kinds = 7;
+char vals[kinds][112] = {
+    "Hello World!",
+    "My name is DBMS!",
+    "BPT is dynamic index!",
+    "disk is managed as page!",
+    "hfdjshfksdhfksdhfkdsjhfkshfkjhsdkjfhksa",
+    "hgjsdhgdshpqiqowhoqiwrjqoijeqnlgdsghosghsdjghsdkjghhoq",
+    "13512uo1ut018ugjog10gu310ijonf13ijgioflfm!fo13t0",
+};
+uint16_t sizes[kinds] = {50, 70, 100, 112, 112, 112, 112};
+
+void __scanning_func(void *arg) {
+  int64_t table_id[TABLE_NUMBER];
+  memcpy(table_id, arg, sizeof(table_id));
+
+  std::vector<std::pair<int64_t, int64_t>> keys;
+  for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
+    for (int rid = 0; rid < TABLE_NUMBER; ++rid) {
+      keys.emplace_back(std::make_pair(tid, rid));
+    }
+  }
+  std::random_device rd;
+  std::default_random_engine rng(rd());
+
+  char read_buf[112];
+  uint16_t size;
+  for (int scan = 0; scan < SCANNING_COUNT; ++scan) {
+    std::shuffle(keys.begin(), keys.end(), rng);
+    auto trx = trx_begin();
+    for (auto &key : keys) {
+      auto id = key.first + key.second;
+      ASSERT_EQ(db_find(table_id[key.first], key.second, read_buf, &size, trx),
+                0);
+      ASSERT_EQ(size, sizes[id % kinds]);
+      ASSERT_TRUE(strcmp(read_buf, vals[id % kinds]) == 0);
+    }
+    ASSERT_EQ(trx_commit(trx), trx);
+  }
+}
+
+void *scanning_func(void *arg) {
+  __scanning_func(arg);
+  return NULL;
+}
+
+TEST_F(TrxTest, s_lock_only) {
+  SetUp("TT_s_lock_only_test.db");
+  pthread_t scanning_threads[SCANNING_THREAD_NUM];
+
+  srand(time(NULL));
+
+  // initialize accounts
+  for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
+    for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
+      auto id = tid + rid;
+      ASSERT_EQ(
+          db_insert(table_id[tid], rid, vals[id % kinds], sizes[id % kinds]),
+          0);
+    }
+  }
+  GPRINTF("initialization done.");
+
+  for (int i = 0; i < SCANNING_THREAD_NUM; ++i) {
+    pthread_create(&scanning_threads[i], 0, scanning_func, (void *)table_id);
+  }
+
+  for (int i = 0; i < SCANNING_THREAD_NUM; ++i) {
+    pthread_join(scanning_threads[i], NULL);
+  }
+  GPRINTF("complete!");
+}
+
+// X lock only test
+const int UPDATING_THREAD_NUM = 30;
+const int UPDATING_COUNT = 30;
+
+void __updating_func(void *arg) {
+  int64_t table_id[TABLE_NUMBER];
+  memcpy(table_id, arg, sizeof(table_id));
+
+  char read_buf[112];
+  uint16_t size;
+  for (int iter = 0; iter < UPDATING_COUNT; ++iter) {
+    int tid = rand() % TABLE_NUMBER;
+    auto trx = trx_begin();
+    for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
+      auto id = rid + tid;
+      ASSERT_EQ(db_update(table_id[tid], rid, vals[id % kinds],
+                          sizes[id % kinds], &size, trx),
+                0);
+      ASSERT_EQ(size, sizes[id % kinds]);
+    }
+    ASSERT_EQ(trx_commit(trx), trx);
+    if ((iter + 1) % 10 == 0) LOG_INFO("iteration %d done", (iter + 1));
+  }
+}
+
+void *updating_func(void *arg) {
+  __updating_func(arg);
+  return NULL;
+}
+
+TEST_F(TrxTest, x_lock_only) {
+  SetUp("TT_x_lock_only_test.db");
+  pthread_t updating_threads[UPDATING_THREAD_NUM];
+
+  srand(time(NULL));
+
+  // initialize accounts
+  for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
+    for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
+      auto id = tid + rid;
+      ASSERT_EQ(
+          db_insert(table_id[tid], rid, vals[id % kinds], sizes[id % kinds]),
+          0);
+    }
+  }
+  GPRINTF("initialization done.");
+
+  for (int i = 0; i < UPDATING_THREAD_NUM; ++i) {
+    pthread_create(&updating_threads[i], 0, updating_func, (void *)table_id);
+  }
+
+  for (int i = 0; i < UPDATING_THREAD_NUM; ++i) {
+    pthread_join(updating_threads[i], NULL);
   }
   GPRINTF("complete!");
 }

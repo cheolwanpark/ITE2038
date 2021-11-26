@@ -28,7 +28,7 @@ void __file_read_page(int64_t table_id, pagenum_t pagenum, page_t* dest) {
     return;
   }
   if (read(table_id, dest, sizeof(page_t)) < 0) {
-    LOG_ERR("cannot read page %llu", pagenum);
+    LOG_ERR("cannot read page %llu, errno: %s", pagenum, strerror(errno));
     return;
   }
 }

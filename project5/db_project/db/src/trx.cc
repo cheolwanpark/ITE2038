@@ -5,7 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
+#include <map>
+#include <stack>
 #include <unordered_map>
 
 #include "buffer_manager.h"
@@ -23,6 +26,7 @@ struct update_log_t {
 
 struct trx_t {
   trx_id_t id;
+  clock_t start_time;
   lock_t *head;
   update_log_t *log_head;
 };
@@ -54,8 +58,6 @@ lock_t *create_lock(int64_t record_id, int mode);
 void destroy_lock(lock_t *lock);
 int push_into_lock_list(lock_list_t &lock_list, lock_t *lock);
 int remove_from_lock_list(lock_t *lock);
-int wait_if_conflict(lock_t *lock);
-int awake_if_not_conflict(lock_t *lock);
 int is_conflicting(lock_t *a, lock_t *b);
 lock_t *find_conflicting_lock(lock_t *lock);
 int is_running(trx_t *trx);
@@ -86,10 +88,7 @@ int push_into_trx(trx_id_t trx_id, lock_t *lock) {
     return 1;
   }
   // mutexes are already locked in lock_acquire
-  if (!is_trx_assigned(trx_id)) {
-    LOG_ERR("there is no trx with id = %d", trx_id);
-    return 1;
-  }
+  if (!is_trx_assigned(trx_id)) return 1;
   auto *trx = trx_table[trx_id];
   lock->owner_trx = trx;
   lock->trx_next_lock = trx->head;
@@ -110,6 +109,7 @@ int trx_begin() {
     return 0;
   }
   new_trx->id = trx_counter;
+  new_trx->start_time = clock();
   new_trx->head = NULL;
   new_trx->log_head = NULL;
   auto res = trx_table.emplace(new_trx->id, new_trx);
@@ -176,6 +176,7 @@ int trx_abort_without_erase(trx_t *trx) {
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
+    pthread_cond_signal(&current->cond);
     if (lock_release(current)) {
       LOG_ERR("failed to release lock");
       return 1;
@@ -331,37 +332,6 @@ int remove_from_lock_list(lock_t *lock) {
   return 0;
 }
 
-int wait_if_conflict(lock_t *lock) {
-  if (lock == NULL) {
-    LOG_ERR("invalid parameters");
-    return 1;
-  }
-  if (lock->sentinel == NULL) {
-    LOG_ERR("invalid lock object: sentinel is NULL");
-    return 1;
-  }
-
-  if (find_conflicting_lock(lock) != NULL)
-    pthread_cond_wait(&lock->cond, &lock_table_latch);
-  return 0;
-}
-
-int awake_if_not_conflict(lock_t *lock) {
-  if (lock == NULL) {
-    LOG_ERR("invalid parameters");
-    return 1;
-  }
-  if (lock->sentinel == NULL) {
-    LOG_ERR("invalid lock object: sentinel is NULL");
-    return 1;
-  }
-
-  if (find_conflicting_lock(lock) == NULL) {
-    pthread_cond_signal(&lock->cond);
-  }
-  return 0;
-}
-
 int init_lock_table() { return 0; }
 
 int free_lock_table() {
@@ -412,37 +382,34 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
 
   // create and push new lock
   auto *new_lock = create_lock(key, lock_mode);
+  new_lock->sentinel = &lock_list;
   if (new_lock == NULL) {
     pthread_mutex_unlock(&lock_table_latch);
     LOG_ERR("failed to create a new lock");
-    return NULL;
-  }
-  if (push_into_lock_list(lock_list, new_lock)) {
-    pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to push into the lock list");
-    destroy_lock(new_lock);
     return NULL;
   }
   pthread_mutex_lock(&trx_table_latch);
   if (push_into_trx(trx_id, new_lock)) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to push into the trx");
     destroy_lock(new_lock);
     return NULL;
   }
-  if (is_deadlock(new_lock)) {
-    if (trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
-    pthread_mutex_unlock(&trx_table_latch);
+  // if (is_deadlock(new_lock)) {
+  //   if (trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
+  //   pthread_mutex_unlock(&trx_table_latch);
+  //   pthread_mutex_unlock(&lock_table_latch);
+  //   return NULL;
+  // }
+  pthread_mutex_unlock(&trx_table_latch);
+  if (push_into_lock_list(lock_list, new_lock)) {
     pthread_mutex_unlock(&lock_table_latch);
+    LOG_ERR("failed to push into the lock list");
+    destroy_lock(new_lock);
     return NULL;
   }
-  pthread_mutex_unlock(&trx_table_latch);
-  if (wait_if_conflict(new_lock)) {
-    pthread_mutex_unlock(&trx_table_latch);
-    pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to make wait conflicting lock");
-    return NULL;
+  if (find_conflicting_lock(new_lock) != NULL) {
+    pthread_cond_wait(&new_lock->cond, &lock_table_latch);
   }
   pthread_mutex_unlock(&lock_table_latch);
   return new_lock;
@@ -463,9 +430,8 @@ int lock_release(lock_t *lock_obj) {
   }
   destroy_lock(lock_obj);
   while (iter != NULL) {
-    if (iter->record_id == rid && awake_if_not_conflict(iter)) {
-      LOG_WARN("failed to awake non-conflicting locks");
-      return 1;
+    if (iter->record_id == rid && find_conflicting_lock(iter) == NULL) {
+      pthread_cond_signal(&iter->cond);
     }
     iter = iter->next;
   }
@@ -520,6 +486,7 @@ int is_running(trx_t *trx) {
 }
 
 int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
+  // latches are already locked in is_deadlock
   if (is_running(target_trx)) return false;
   auto *trx_lock_iter = target_trx->head;
   while (trx_lock_iter != NULL) {
@@ -548,21 +515,7 @@ int is_deadlock(lock_t *lock) {
     LOG_ERR("invalid lock object: sentinel or owner trx is NULL");
     return false;
   }
-
   // mutexes are already locked in lock_acquire
-
-  // // print lock table
-  // fprintf(stderr, "\n\n\n\n");
-  // for (auto &pair : lock_table) {
-  //   auto &list = pair.second;
-  //   for (auto *iter = list.head; iter != NULL; iter = iter->next) {
-  //     fprintf(stderr, "%s(%lld, t%d)  ", iter->lock_mode == S_LOCK ? "S" :
-  //     "X",
-  //             iter->record_id, iter->owner_trx->id);
-  //   }
-  //   fprintf(stderr, "\n");
-  // }
-  // // ====================
 
   auto *sentinel = lock->sentinel;
   auto *checking_trx = lock->owner_trx;
