@@ -395,12 +395,12 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
     destroy_lock(new_lock);
     return NULL;
   }
-  // if (is_deadlock(new_lock)) {
-  //   if (trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
-  //   pthread_mutex_unlock(&trx_table_latch);
-  //   pthread_mutex_unlock(&lock_table_latch);
-  //   return NULL;
-  // }
+  if (is_deadlock(new_lock)) {
+    if (trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
+    pthread_mutex_unlock(&trx_table_latch);
+    pthread_mutex_unlock(&lock_table_latch);
+    return NULL;
+  }
   pthread_mutex_unlock(&trx_table_latch);
   if (push_into_lock_list(lock_list, new_lock)) {
     pthread_mutex_unlock(&lock_table_latch);
@@ -430,8 +430,10 @@ int lock_release(lock_t *lock_obj) {
   }
   destroy_lock(lock_obj);
   while (iter != NULL) {
-    if (iter->record_id == rid && find_conflicting_lock(iter) == NULL) {
+    if (iter->record_id == rid) {
       pthread_cond_signal(&iter->cond);
+      // locks behind the X lock are conflicting with this X lock
+      if (iter->lock_mode == X_LOCK) break;
     }
     iter = iter->next;
   }
@@ -498,6 +500,8 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
           return true;
         } else if (is_deadlock(checking_trx, iter->owner_trx))
           return true;
+        // we don't have to check locks after first x lock
+        if (iter->lock_mode == X_LOCK) break;
       }
       iter = iter->next;
     }
@@ -521,9 +525,10 @@ int is_deadlock(lock_t *lock) {
   auto *checking_trx = lock->owner_trx;
   auto *iter = sentinel->head;
   while (iter != NULL && iter != lock) {
-    if (is_conflicting(iter, lock) &&
-        is_deadlock(checking_trx, iter->owner_trx)) {
-      return true;
+    if (is_conflicting(iter, lock)) {
+      if (is_deadlock(checking_trx, iter->owner_trx)) return true;
+      // we don't have to check locks after first x lock
+      if (iter->lock_mode == X_LOCK) break;
     }
     iter = iter->next;
   }

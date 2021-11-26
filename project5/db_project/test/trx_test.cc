@@ -276,7 +276,7 @@ TEST_F(TrxTest, s_lock_only) {
 
 // X lock only test
 const int UPDATING_THREAD_NUM = 30;
-const int UPDATING_COUNT = 30;
+const int UPDATING_COUNT = 1000;
 
 void __updating_func(void *arg) {
   int64_t table_id[TABLE_NUMBER];
@@ -284,10 +284,17 @@ void __updating_func(void *arg) {
 
   char read_buf[112];
   uint16_t size;
+  std::vector<int> rids;
   for (int iter = 0; iter < UPDATING_COUNT; ++iter) {
     int tid = rand() % TABLE_NUMBER;
     auto trx = trx_begin();
-    for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
+
+    auto n = rand() % 5 + 3;
+    rids.clear();
+    for (int i = 0; i < n; ++i) rids.push_back(rand() % RECORD_NUMBER);
+    std::sort(rids.begin(), rids.end());
+
+    for (auto rid : rids) {
       auto id = rid + tid;
       ASSERT_EQ(db_update(table_id[tid], rid, vals[id % kinds],
                           sizes[id % kinds], &size, trx),
@@ -295,7 +302,7 @@ void __updating_func(void *arg) {
       ASSERT_EQ(size, sizes[id % kinds]);
     }
     ASSERT_EQ(trx_commit(trx), trx);
-    if ((iter + 1) % 10 == 0) LOG_INFO("iteration %d done", (iter + 1));
+    if ((iter + 1) % 100 == 0) LOG_INFO("iteration %d done", (iter + 1));
   }
 }
 
