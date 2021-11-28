@@ -53,9 +53,11 @@ struct lock_t {
 // function definitions
 bool is_trx_assigned(trx_id_t id);
 int push_into_trx(trx_id_t trx_id, lock_t *lock);
+int __trx_abort(trx_id_t trx_id);
 lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id);
 lock_t *create_lock(int64_t record_id, int mode);
 void destroy_lock(lock_t *lock);
+int __lock_release(lock_t *lock_obj);
 int push_into_lock_list(lock_list_t &lock_list, lock_t *lock);
 int remove_from_lock_list(lock_t *lock);
 int is_conflicting(lock_t *a, lock_t *b);
@@ -65,12 +67,8 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx);
 int is_deadlock(lock_t *lock);
 
 // mutexes
-#ifdef __unix__
-#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER \
-  PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
-#endif
-pthread_mutex_t trx_table_latch = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
-pthread_mutex_t lock_table_latch = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+pthread_mutex_t trx_table_latch = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lock_table_latch = PTHREAD_MUTEX_INITIALIZER;
 
 // Transaction API relevent code
 int trx_counter = 1;
@@ -149,7 +147,7 @@ int trx_commit(trx_id_t trx_id) {
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
-    if (lock_release(current)) {
+    if (__lock_release(current)) {
       pthread_mutex_unlock(&trx_table_latch);
       pthread_mutex_unlock(&lock_table_latch);
       LOG_ERR("failed to release lock");
@@ -166,13 +164,9 @@ int trx_commit(trx_id_t trx_id) {
   return trx_id;
 }
 
-int trx_abort(trx_id_t trx_id) {
-  pthread_mutex_lock(&lock_table_latch);  // deadlock prevention
-  pthread_mutex_lock(&trx_table_latch);
+int __trx_abort(trx_id_t trx_id) {
   if (!is_trx_assigned(trx_id)) {
-    pthread_mutex_unlock(&trx_table_latch);
-    pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("there is no trx with id = %d", trx_id);
+    LOG_WARN("there is no trx with id = %d", trx_id);
     return 0;
   }
   auto *trx = trx_table[trx_id];
@@ -201,18 +195,27 @@ int trx_abort(trx_id_t trx_id) {
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
-    if (lock_release(current)) {
-      pthread_mutex_unlock(&trx_table_latch);
-      pthread_mutex_unlock(&lock_table_latch);
-      LOG_ERR("failed to release lock");
-      return 1;
+    if (__lock_release(current)) {
+      LOG_WARN("failed to release lock");
+      return 0;
     }
   }
 
   // erase from trx table and free trx
   trx_table.erase(trx_id);
   free(trx);
+  return trx_id;
+}
 
+int trx_abort(trx_id_t trx_id) {
+  pthread_mutex_lock(&lock_table_latch);  // deadlock prevention
+  pthread_mutex_lock(&trx_table_latch);
+  if (__trx_abort(trx_id) != trx_id) {
+    pthread_mutex_unlock(&trx_table_latch);
+    pthread_mutex_unlock(&lock_table_latch);
+    LOG_ERR("failed to abort");
+    return 0;
+  }
   pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_unlock(&lock_table_latch);
   return trx_id;
@@ -343,7 +346,7 @@ int free_lock_table() {
     running_trx_ids.push_back(iter.first);
   }
   for (auto trx_id : running_trx_ids) {
-    if (trx_abort(trx_id)) {
+    if (__trx_abort(trx_id) != trx_id) {
       pthread_mutex_unlock(&trx_table_latch);
       pthread_mutex_unlock(&lock_table_latch);
       LOG_ERR("failed to abort the trx %d", trx_id);
@@ -404,7 +407,7 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
     return NULL;
   }
   if (is_deadlock(new_lock)) {
-    if (trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
+    if (__trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
     return NULL;
@@ -424,13 +427,12 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   return new_lock;
 };
 
-int lock_release(lock_t *lock_obj) {
+int __lock_release(lock_t *lock_obj) {
   if (lock_obj == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_WARN("invalid parameters");
     return 1;
   }
 
-  pthread_mutex_lock(&lock_table_latch);
   auto *iter = lock_obj->next;
   auto rid = lock_obj->record_id;
   if (remove_from_lock_list(lock_obj)) {
@@ -450,6 +452,21 @@ int lock_release(lock_t *lock_obj) {
       }
     }
     iter = iter->next;
+  }
+  return 0;
+}
+
+int lock_release(lock_t *lock_obj) {
+  if (lock_obj == NULL) {
+    LOG_ERR("invalid parameters");
+    return 1;
+  }
+
+  pthread_mutex_lock(&lock_table_latch);
+  if (__lock_release(lock_obj)) {
+    pthread_mutex_unlock(&lock_table_latch);
+    LOG_ERR("failed to release lock");
+    return 1;
   }
   pthread_mutex_unlock(&lock_table_latch);
   return 0;
