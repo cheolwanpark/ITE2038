@@ -11,16 +11,18 @@ constexpr double DEADLOCK_CHECK_INTERVAL = 5.0;
 constexpr int S_LOCK = 0;
 constexpr int X_LOCK = 1;
 
-// APIs for transaction
+// types
 using trx_id_t = int;
+struct lock_t;
+
+// APIs for transaction
 int trx_begin();
 int trx_commit(trx_id_t trx_id);
 int trx_abort(trx_id_t trx_id);
-int trx_log_update(trx_id_t trx_id, int64_t table_id, pagenum_t page_id,
+int trx_log_update(lock_t* lock, int64_t table_id, pagenum_t page_id,
                    uint16_t offset, uint16_t len, const byte* bef);
 
 // APIs for locking
-struct lock_t;
 int init_lock_table();
 int free_lock_table();
 lock_t* lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,

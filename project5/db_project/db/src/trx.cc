@@ -10,6 +10,7 @@
 #include <map>
 #include <stack>
 #include <unordered_map>
+#include <vector>
 
 #include "buffer_manager.h"
 #include "log.h"
@@ -52,7 +53,6 @@ struct lock_t {
 // function definitions
 bool is_trx_assigned(trx_id_t id);
 int push_into_trx(trx_id_t trx_id, lock_t *lock);
-int trx_abort_without_erase(trx_t *trx);
 lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id);
 lock_t *create_lock(int64_t record_id, int mode);
 void destroy_lock(lock_t *lock);
@@ -134,6 +134,17 @@ int trx_commit(trx_id_t trx_id) {
     return 0;
   }
   auto *trx = trx_table[trx_id];
+
+  // release all update logs
+  auto *log_iter = trx->log_head;
+  while (log_iter != NULL) {
+    auto *current = log_iter;
+    log_iter = log_iter->next;
+    free(current->bef);
+    free(current);
+  }
+
+  // release all locks
   auto *iter = trx->head;
   while (iter != NULL) {
     auto *current = iter;
@@ -145,45 +156,14 @@ int trx_commit(trx_id_t trx_id) {
       return 0;
     }
   }
+
+  // erase from trx table and free trx
   trx_table.erase(trx_id);
+  free(trx);
+
   pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_unlock(&lock_table_latch);
   return trx_id;
-}
-
-int trx_abort_without_erase(trx_t *trx) {
-  // trx_table_latch is already locked in trx_abort or free_lock_table
-  // revert all updates
-  auto *upd_iter = trx->log_head;
-  page_t page;
-  while (upd_iter != NULL) {
-    // overwrite record with bef buffer
-    buffer_read_page(upd_iter->table_id, upd_iter->page_id, &page);
-    memcpy(page.data + upd_iter->offset, upd_iter->bef, upd_iter->len);
-    buffer_write_page(upd_iter->table_id, upd_iter->page_id, &page);
-    unpin(upd_iter->table_id, upd_iter->page_id);
-
-    // update iterator
-    auto *freeing = upd_iter;
-    upd_iter = upd_iter->next;
-
-    // free update log
-    free(freeing->bef);
-    free(freeing);
-  }
-
-  auto *iter = trx->head;
-  while (iter != NULL) {
-    auto *current = iter;
-    iter = iter->trx_next_lock;
-    pthread_cond_signal(&current->cond);
-    if (lock_release(current)) {
-      LOG_ERR("failed to release lock");
-      return 1;
-    }
-  }
-  free(trx);
-  return 0;
 }
 
 int trx_abort(trx_id_t trx_id) {
@@ -196,34 +176,57 @@ int trx_abort(trx_id_t trx_id) {
     return 0;
   }
   auto *trx = trx_table[trx_id];
-  trx_table.erase(trx_id);
-  pthread_mutex_unlock(&trx_table_latch);
-  if (trx_abort_without_erase(trx)) {
-    pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to abort trx");
-    return 0;
+
+  // revert all updates
+  auto *log_iter = trx->log_head;
+  page_t page;
+  while (log_iter != NULL) {
+    // overwrite records with log
+    buffer_read_page(log_iter->table_id, log_iter->page_id, &page);
+    memcpy(page.data + log_iter->offset, log_iter->bef, log_iter->len);
+    buffer_write_page(log_iter->table_id, log_iter->page_id, &page);
+    unpin(log_iter->table_id, log_iter->page_id);
+
+    // update iterator
+    auto *current = log_iter;
+    log_iter = log_iter->next;
+
+    // free update log
+    free(current->bef);
+    free(current);
   }
+
+  // release all locks
+  auto *iter = trx->head;
+  while (iter != NULL) {
+    auto *current = iter;
+    iter = iter->trx_next_lock;
+    if (lock_release(current)) {
+      pthread_mutex_unlock(&trx_table_latch);
+      pthread_mutex_unlock(&lock_table_latch);
+      LOG_ERR("failed to release lock");
+      return 1;
+    }
+  }
+
+  // erase from trx table and free trx
+  trx_table.erase(trx_id);
+  free(trx);
+
+  pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_unlock(&lock_table_latch);
   return trx_id;
 }
 
-int trx_log_update(trx_id_t trx_id, int64_t table_id, pagenum_t page_id,
+int trx_log_update(lock_t *lock, int64_t table_id, pagenum_t page_id,
                    uint16_t offset, uint16_t len, const byte *bef) {
-  if (bef == NULL) {
+  if (lock == NULL || bef == NULL) {
     LOG_ERR("invalid parameters");
     return 1;
   }
-  pthread_mutex_lock(&trx_table_latch);
-  if (!is_trx_assigned(trx_id)) {
-    pthread_mutex_unlock(&trx_table_latch);
-    LOG_ERR("there is no trx with id = %d", trx_id);
-    return 1;
-  }
-
   // create update log object
   update_log_t *result = (update_log_t *)malloc(sizeof(update_log_t));
   if (result == NULL) {
-    pthread_mutex_unlock(&trx_table_latch);
     LOG_ERR("failed to allocate new update log object");
     return 1;
   }
@@ -233,7 +236,6 @@ int trx_log_update(trx_id_t trx_id, int64_t table_id, pagenum_t page_id,
   result->len = len;
   result->bef = (byte *)malloc(len);
   if (result->bef == NULL) {
-    pthread_mutex_unlock(&trx_table_latch);
     free(result);
     LOG_ERR("failed to allocate bef buffer");
     return 1;
@@ -241,10 +243,9 @@ int trx_log_update(trx_id_t trx_id, int64_t table_id, pagenum_t page_id,
   memcpy(result->bef, bef, len);
 
   // push it into transaction
-  auto *trx = trx_table[trx_id];
+  auto *trx = lock->owner_trx;
   result->next = trx->log_head;
   trx->log_head = result;
-  pthread_mutex_unlock(&trx_table_latch);
   return 0;
 }
 
@@ -337,8 +338,15 @@ int init_lock_table() { return 0; }
 int free_lock_table() {
   pthread_mutex_lock(&lock_table_latch);
   pthread_mutex_lock(&trx_table_latch);
+  std::vector<trx_id_t> running_trx_ids;
   for (auto &iter : trx_table) {
-    if (trx_abort_without_erase(iter.second)) {
+    running_trx_ids.push_back(iter.first);
+  }
+  for (auto trx_id : running_trx_ids) {
+    if (trx_abort(trx_id)) {
+      pthread_mutex_unlock(&trx_table_latch);
+      pthread_mutex_unlock(&lock_table_latch);
+      LOG_ERR("failed to abort the trx %d", trx_id);
       return 1;
     }
   }
@@ -401,13 +409,14 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
     pthread_mutex_unlock(&lock_table_latch);
     return NULL;
   }
-  pthread_mutex_unlock(&trx_table_latch);
   if (push_into_lock_list(lock_list, new_lock)) {
+    pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
     LOG_ERR("failed to push into the lock list");
     destroy_lock(new_lock);
     return NULL;
   }
+  pthread_mutex_unlock(&trx_table_latch);
   if (find_conflicting_lock(new_lock) != NULL) {
     pthread_cond_wait(&new_lock->cond, &lock_table_latch);
   }

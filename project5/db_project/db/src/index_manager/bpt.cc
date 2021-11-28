@@ -1239,8 +1239,9 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return false;
 
+  lock_t *lock = NULL;
   if (trx_id > 0) {  // acquire record lock before getting page latch
-    auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, X_LOCK);
+    lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, X_LOCK);
     if (lock == NULL) {
       return false;
     }
@@ -1252,8 +1253,8 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
   auto num_of_keys = page.leaf_data.header.num_of_keys;
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
-      if (trx_id > 0 &&
-          trx_log_update(trx_id, table_id, leaf_pagenum, slots[i].offset,
+      if (lock != NULL &&
+          trx_log_update(lock, table_id, leaf_pagenum, slots[i].offset,
                          new_val_size, page.page.data + slots[i].offset)) {
         LOG_ERR("failed to make update log on trx");
         return false;

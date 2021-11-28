@@ -15,12 +15,12 @@
 #include "log.h"
 
 const long long TABLE_NUMBER = 3;
-const long long RECORD_NUMBER = 2000;
+const long long RECORD_NUMBER = 10000;
 
-const int TRANSFER_COUNT = 5000;
-const int SCAN_COUNT = 200;
-const int TRANSFER_THREAD_NUM = 10;
-const int SCAN_THREAD_NUM = 2;
+const int TRANSFER_COUNT = 10000;
+const int SCAN_COUNT = 100;
+const int TRANSFER_THREAD_NUM = 15;
+const int SCAN_THREAD_NUM = 3;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -73,11 +73,6 @@ void __transfer_thread_func(void *arg) {
     if (src_table_id == dest_table_id && src_record_id == dest_record_id)
       continue;
 
-    // // deadlock prevention
-    // if (src_table_id > dest_table_id) std::swap(src_table_id, dest_table_id);
-    // if (src_record_id > dest_record_id)
-    //   std::swap(src_record_id, dest_record_id);
-
     money_transferred = rand() % MAX_MONEY_TRANSFERRED;
     money_transferred =
         rand() % 2 == 0 ? -money_transferred : money_transferred;
@@ -116,7 +111,7 @@ void __transfer_thread_func(void *arg) {
     if ((i + 1) % 1000 == 0)
       LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
   }
-  GPRINTF("Transfer thread is done.");
+  LOG_INFO("Transfer thread is done.");
 }
 
 void *transfer_thread_func(void *arg) {
@@ -153,10 +148,10 @@ void __scan_thread_func(void *arg) {
       ASSERT_EQ(sum_money, SUM_MONEY)
           << "Inconsistent state is detected in " << scan + 1 << "th scan!!";
     }
-    if ((scan + 1) % 100 == 0)
+    if ((scan + 1) % 10 == 0)
       LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
   }
-  GPRINTF("Scan thread is done.");
+  LOG_INFO("Scan thread is done.");
 }
 
 void *scan_thread_func(void *arg) {
@@ -275,33 +270,43 @@ TEST_F(TrxTest, s_lock_only) {
 }
 
 // X lock only test
-const int UPDATING_THREAD_NUM = 100;
-const int UPDATING_COUNT = 1000;
+constexpr int UPDATING_THREAD_NUM = 100;
+constexpr int UPDATING_COUNT = 1000;
+
+constexpr char CHARSET[] =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+constexpr int CHARSET_LEN = sizeof(CHARSET) - 1;
+
+void gen_random_str(char *out, int size) {
+  for (int i = 0; i < size; ++i) {
+    out[i] = CHARSET[rand() % CHARSET_LEN];
+  }
+}
 
 void __updating_func(void *arg) {
   int64_t table_id[TABLE_NUMBER];
   memcpy(table_id, arg, sizeof(table_id));
 
-  char read_buf[112];
+  char buf[112];
   uint16_t size;
   std::vector<int> rids;
   for (int iter = 0; iter < UPDATING_COUNT; ++iter) {
     int tid = rand() % TABLE_NUMBER;
-    auto trx = trx_begin();
-
     auto n = rand() % 5 + 3;
     rids.clear();
     for (int i = 0; i < n; ++i) rids.push_back(rand() % RECORD_NUMBER);
     std::sort(rids.begin(), rids.end());
 
+    auto trx = trx_begin();
     for (auto rid : rids) {
-      auto id = rid + tid;
-      ASSERT_EQ(db_update(table_id[tid], rid, vals[id % kinds],
-                          sizes[id % kinds], &size, trx),
-                0);
-      ASSERT_EQ(size, sizes[id % kinds]);
+      auto new_size = rand() % 50 + 50;
+      gen_random_str(buf, new_size);
+      ASSERT_EQ(db_update(table_id[tid], rid, buf, new_size, &size, trx), 0);
     }
-    ASSERT_EQ(trx_commit(trx), trx);
+    if (rand() % 3)
+      ASSERT_EQ(trx_commit(trx), trx);
+    else
+      ASSERT_EQ(trx_abort(trx), trx);
     if ((iter + 1) % 100 == 0) LOG_INFO("iteration %d done", (iter + 1));
   }
 }
@@ -318,15 +323,14 @@ TEST_F(TrxTest, x_lock_only) {
   srand(time(NULL));
 
   // initialize accounts
+  char buf[112];
   for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
     for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
-      auto id = tid + rid;
-      ASSERT_EQ(
-          db_insert(table_id[tid], rid, vals[id % kinds], sizes[id % kinds]),
-          0);
+      gen_random_str(buf, 100);
+      ASSERT_EQ(db_insert(table_id[tid], rid, buf, 100), 0);
     }
   }
-  GPRINTF("initialization done.");
+  LOG_INFO("initialization done.");
 
   for (int i = 0; i < UPDATING_THREAD_NUM; ++i) {
     pthread_create(&updating_threads[i], 0, updating_func, (void *)table_id);
@@ -335,5 +339,5 @@ TEST_F(TrxTest, x_lock_only) {
   for (int i = 0; i < UPDATING_THREAD_NUM; ++i) {
     pthread_join(updating_threads[i], NULL);
   }
-  GPRINTF("complete!");
+  LOG_INFO("complete!");
 }
