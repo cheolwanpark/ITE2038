@@ -3,8 +3,22 @@
 
 #include "buffer_manager.h"
 
-// key type
+// constants
+constexpr uint64_t kBptPageHeaderSize = 128;
+
+// type definitions
 typedef int64_t bpt_key_t;
+
+struct bpt_header_t {  // used in lock manager
+  pagenum_t parent_page;
+  uint32_t is_leaf;
+  uint32_t num_of_keys;
+};
+
+union bpt_page_t {
+  page_t page;
+  bpt_header_t header;
+};
 
 // find record
 // if trx_id is less than 1, then do nothing with trx

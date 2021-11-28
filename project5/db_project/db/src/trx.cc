@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "buffer_manager.h"
+#include "index_manager/bpt.h"
 #include "log.h"
 
 // trx, lock relevent datatypes
@@ -204,6 +205,7 @@ int __trx_abort(trx_id_t trx_id) {
   // erase from trx table and free trx
   trx_table.erase(trx_id);
   free(trx);
+
   return trx_id;
 }
 
@@ -221,9 +223,9 @@ int trx_abort(trx_id_t trx_id) {
   return trx_id;
 }
 
-int trx_log_update(lock_t *lock, int64_t table_id, pagenum_t page_id,
+int trx_log_update(trx_t *trx, int64_t table_id, pagenum_t page_id,
                    uint16_t offset, uint16_t len, const byte *bef) {
-  if (lock == NULL || bef == NULL) {
+  if (trx == NULL || bef == NULL) {
     LOG_ERR("invalid parameters");
     return 1;
   }
@@ -246,7 +248,6 @@ int trx_log_update(lock_t *lock, int64_t table_id, pagenum_t page_id,
   memcpy(result->bef, bef, len);
 
   // push it into transaction
-  auto *trx = lock->owner_trx;
   result->next = trx->log_head;
   trx->log_head = result;
   return 0;
@@ -375,6 +376,127 @@ int free_lock_table() {
   return 0;
 }
 
+struct leaf_slot_t {
+  bpt_key_t key;
+  uint16_t size;
+  uint16_t offset;
+  int32_t trx_id;
+} __attribute__((packed));
+
+int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
+                          trx_id_t trx_id) {
+  pthread_mutex_lock(&lock_table_latch);
+  pthread_mutex_lock(&trx_table_latch);
+
+  bpt_page_t page;
+  buffer_read_page(table_id, page_id, &page.page);
+
+  leaf_slot_t *slots = (leaf_slot_t *)(page.page.data + kBptPageHeaderSize);
+  auto num_of_keys = page.header.num_of_keys;
+
+  for (int i = 0; i < num_of_keys; ++i) {
+    if (slots[i].key == key) {
+      auto locking_trx_id = slots[i].trx_id;
+      // there is implicit lock, convert it into implicit lock
+      // if implicit lock is held by given trx, then do not convert
+      if (locking_trx_id != 0 && locking_trx_id != trx_id &&
+          is_trx_assigned(locking_trx_id)) {
+        // remove implicit lock
+        slots[i].trx_id = 0;
+        buffer_write_page(table_id, page_id, &page.page);
+
+        // create explicit lock
+        auto &lock_list = get_lock_list(table_id, page_id);
+        auto *new_lock = create_lock(key, X_LOCK);
+        new_lock->sentinel = &lock_list;
+        if (new_lock == NULL) {
+          unpin(table_id, page_id);
+          pthread_mutex_unlock(&trx_table_latch);
+          pthread_mutex_unlock(&lock_table_latch);
+          LOG_ERR("failed to create a new lock");
+          return 1;
+        }
+        if (push_into_trx(locking_trx_id, new_lock)) {
+          unpin(table_id, page_id);
+          pthread_mutex_unlock(&trx_table_latch);
+          pthread_mutex_unlock(&lock_table_latch);
+          destroy_lock(new_lock);
+          return 1;
+        }
+        if (push_into_lock_list(lock_list, new_lock)) {
+          unpin(table_id, page_id);
+          pthread_mutex_unlock(&trx_table_latch);
+          pthread_mutex_unlock(&lock_table_latch);
+          LOG_ERR("failed to push into the lock list");
+          return 1;
+        }
+        // after converting, do nothing. (lock will be acquired outside)
+      }
+      break;
+    }
+  }
+  unpin(table_id, page_id);
+  pthread_mutex_unlock(&trx_table_latch);
+  pthread_mutex_unlock(&lock_table_latch);
+  return 0;
+}
+
+trx_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
+                         int trx_id) {
+  pthread_mutex_lock(&lock_table_latch);
+  auto &lock_list = get_lock_list(table_id, page_id);
+
+  // check if there is conflicting lock
+  auto *iter = lock_list.head;
+  while (iter != NULL) {
+    // there is lock, so cannot hold implicit lock
+    if (iter->record_id == key) {
+      // only same transaction's S lock is allowed
+      if (iter->owner_trx->id == trx_id && iter->lock_mode == S_LOCK) {
+        iter = iter->next;
+        continue;
+      } else {
+        pthread_mutex_unlock(&lock_table_latch);
+        return NULL;
+      }
+    }
+    iter = iter->next;
+  }
+
+  pthread_mutex_lock(&trx_table_latch);
+  // check if requesting trx is alive
+  if (!is_trx_assigned(trx_id)) {
+    pthread_mutex_unlock(&trx_table_latch);
+    pthread_mutex_unlock(&lock_table_latch);
+    LOG_ERR("there is no transaction with id = %d", trx_id);
+    return NULL;
+  }
+  auto *trx = trx_table[trx_id];
+
+  // add implicit lock
+  // if there was an implicit lock it has already been converted into X lock by
+  // convert_implicit_lock
+  bpt_page_t page;
+  buffer_read_page(table_id, page_id, &page.page);
+  pthread_mutex_unlock(&trx_table_latch);
+  pthread_mutex_unlock(&lock_table_latch);
+  leaf_slot_t *slots = (leaf_slot_t *)(page.page.data + kBptPageHeaderSize);
+  auto num_of_keys = page.header.num_of_keys;
+
+  for (int i = 0; i < num_of_keys; ++i) {
+    if (slots[i].key == key) {
+      slots[i].trx_id = trx_id;
+      buffer_write_page(table_id, page_id, &page.page);
+      unpin(table_id, page_id);
+      return trx;
+    }
+  }
+
+  // there is no record with given key
+  unpin(table_id, page_id);
+  return NULL;
+}
+
 lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
                      int trx_id, int lock_mode) {
   pthread_mutex_lock(&lock_table_latch);
@@ -412,14 +534,13 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
     pthread_mutex_unlock(&lock_table_latch);
     return NULL;
   }
+  pthread_mutex_unlock(&trx_table_latch);
   if (push_into_lock_list(lock_list, new_lock)) {
-    pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to push into the lock list");
     destroy_lock(new_lock);
+    LOG_ERR("failed to push into the lock list");
     return NULL;
   }
-  pthread_mutex_unlock(&trx_table_latch);
   if (find_conflicting_lock(new_lock) != NULL) {
     pthread_cond_wait(&new_lock->cond, &lock_table_latch);
   }
@@ -470,6 +591,11 @@ int lock_release(lock_t *lock_obj) {
   }
   pthread_mutex_unlock(&lock_table_latch);
   return 0;
+}
+
+trx_t *get_trx(lock_t *lock) {
+  if (lock == NULL) return NULL;
+  return lock->owner_trx;
 }
 
 int is_conflicting(lock_t *a, lock_t *b) {

@@ -173,8 +173,8 @@ const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
     return NULL;
   }
 
-  pthread_mutex_lock(&buffer_manager_latch);
   auto result = find_frame(table_id, pagenum);
+  pthread_mutex_lock(&buffer_manager_latch);
   if (result == NULL) {
     result = buffer_load_page(table_id, pagenum);
     if (result == NULL) {

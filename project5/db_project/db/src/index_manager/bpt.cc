@@ -6,17 +6,6 @@
 #include "log.h"
 #include "trx.h"
 
-struct bpt_header_t {
-  pagenum_t parent_page;
-  uint32_t is_leaf;
-  uint32_t num_of_keys;
-};
-
-union bpt_page_t {
-  page_t page;
-  bpt_header_t header;
-};
-
 union bpt_leaf_page_t {
   page_t page;
   struct {
@@ -31,6 +20,7 @@ struct leaf_slot_t {
   bpt_key_t key;
   uint16_t size;
   uint16_t offset;
+  int32_t trx_id;
 } __attribute__((packed));
 
 union bpt_internal_page_t {
@@ -47,7 +37,6 @@ struct internal_slot_t {
   pagenum_t pagenum;
 };
 
-const uint64_t kBptPageHeaderSize = 128;
 const uint64_t kMaxNumInternalPageEntries =
     (kPageSize - kBptPageHeaderSize) / sizeof(internal_slot_t);
 const uint64_t kMergeOrDistributeThreshold = 2500;
@@ -414,7 +403,7 @@ bool insert_into_leaf(bpt_leaf_page_t *page, bpt_key_t key, uint16_t size,
     LOG_WARN("invalid parameters");
     return false;
   }
-  if (size < 50 || size > 112) {
+  if (size < 46 || size > 108) {
     LOG_WARN("invalid slot data size");
     return false;
   }
@@ -455,7 +444,7 @@ bool insert_into_leaf(bpt_leaf_page_t *page, bpt_key_t key, uint16_t size,
   for (int i = num_of_keys; i > slotnum; --i) {
     slots[i] = slots[i - 1];
   }
-  slots[slotnum] = {key, size, offset};
+  slots[slotnum] = {key, size, offset, 0};
 
   // insert slot data
   memcpy(page->page.data + offset, value, size);
@@ -477,7 +466,7 @@ pagenum_t insert_into_leaf_after_splitting(int64_t table_id, pagenum_t root,
     LOG_ERR("invalid parameters");
     return 0;
   }
-  if (size < 50 || size > 112) {
+  if (size < 46 || size > 108) {
     LOG_ERR("invalid slot data size");
     return 0;
   }
@@ -778,7 +767,7 @@ pagenum_t redistribute_leaf(int64_t table_id, pagenum_t root,
     while (left->leaf_data.free_space >= kMergeOrDistributeThreshold &&
            right_idx < right_num_of_keys) {
       auto slot = right_slots[right_idx++];
-      // cause maximum slot.size is 112, space is always enough
+      // cause maximum slot.size is 108, space is always enough
       if (!insert_into_leaf(left, slot.key, slot.size,
                             right->page.data + slot.offset)) {
         unpin(table_id, pagenum);
@@ -1211,6 +1200,10 @@ bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
   if (leaf_pagenum == 0) return false;
 
   if (trx_id > 0) {  // acquire record lock before getting page latch
+    if (convert_implicit_lock(table_id, leaf_pagenum, key, trx_id)) {
+      LOG_ERR("failed to convert implicit lock into explicit lock");
+      return false;
+    }
     auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, S_LOCK);
     if (lock == NULL) {
       return false;
@@ -1239,22 +1232,31 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return false;
 
-  lock_t *lock = NULL;
+  trx_t *trx = NULL;
   if (trx_id > 0) {  // acquire record lock before getting page latch
-    lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, X_LOCK);
-    if (lock == NULL) {
+    // if there is no implicit lock, this function do not add lock
+    if (convert_implicit_lock(table_id, leaf_pagenum, key, trx_id)) {
+      LOG_ERR("failed to convert implicit lock into explicit lock");
       return false;
     }
+    trx = try_implicit_lock(table_id, leaf_pagenum, key, trx_id);
+    if (trx == NULL) {  // if failed to get implicit lock then get explicit lock
+      auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, X_LOCK);
+      if (lock == NULL) {
+        return false;
+      }
+      trx = get_trx(lock);
+    }
   }
+
   bpt_leaf_page_t page;
   buffer_read_page(table_id, leaf_pagenum, &page.page);
-
   auto slots = leaf_slot_array(&page);
   auto num_of_keys = page.leaf_data.header.num_of_keys;
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
-      if (lock != NULL &&
-          trx_log_update(lock, table_id, leaf_pagenum, slots[i].offset,
+      if (trx != NULL &&
+          trx_log_update(trx, table_id, leaf_pagenum, slots[i].offset,
                          new_val_size, page.page.data + slots[i].offset)) {
         LOG_ERR("failed to make update log on trx");
         return false;
@@ -1280,7 +1282,7 @@ pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,
     LOG_ERR("invalid parameters");
     return 0;
   }
-  if (size < 50 || size > 112) {
+  if (size < 46 || size > 108) {
     LOG_ERR("invalid slot data size");
     return 0;
   }

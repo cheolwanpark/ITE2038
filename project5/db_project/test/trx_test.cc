@@ -14,7 +14,7 @@
 #include "index_manager/index.h"
 #include "log.h"
 
-const long long TABLE_NUMBER = 3;
+const long long TABLE_NUMBER = 2;
 const long long RECORD_NUMBER = 10000;
 
 const int TRANSFER_COUNT = 10000;
@@ -29,9 +29,10 @@ const long long SUM_MONEY = TABLE_NUMBER * RECORD_NUMBER * INITIAL_MONEY;
 class TrxTest : public ::testing::Test {
  protected:
   void SetUp(const char *filename) {
-    init_db(10000);
+    init_db(30000);
     for (int i = 0; i < TABLE_NUMBER; ++i) {
       sprintf(_filename[i], "%d_%s", i, filename);
+      remove(_filename[i]);
       table_id[i] = file_open_table_file(_filename[i]);
       ASSERT_TRUE(table_id[i] > 0);
     }
@@ -206,7 +207,7 @@ char vals[kinds][112] = {
     "hgjsdhgdshpqiqowhoqiwrjqoijeqnlgdsghosghsdjghsdkjghhoq",
     "13512uo1ut018ugjog10gu310ijonf13ijgioflfm!fo13t0",
 };
-uint16_t sizes[kinds] = {50, 70, 100, 112, 112, 112, 112};
+uint16_t sizes[kinds] = {50, 70, 100, 100, 100, 100, 100};
 
 void __scanning_func(void *arg) {
   int64_t table_id[TABLE_NUMBER];

@@ -20,6 +20,7 @@ class IndexTest : public ::testing::Test {
   void SetUp(const char *filename) {
     strcpy(_filename, filename);
     init_db(NUM_BUF);
+    remove(_filename);
     table_id = open_table(_filename);
     ASSERT_TRUE(table_id > 0);
   }
@@ -43,7 +44,7 @@ TEST_F(IndexTest, insert_and_find) {
       "BPT is dynamic index!",
       "disk is managed as page!",
   };
-  uint16_t sizes[kinds] = {50, 70, 100, 112};
+  uint16_t sizes[kinds] = {50, 70, 90, 100};
 
   uint32_t inserting_cnt = INSERTING_N;
   std::vector<int> keys;
@@ -87,7 +88,7 @@ TEST_F(IndexTest, insert_and_delete_all) {
       "BPT is dynamic index!",
       "disk is managed as page!",
   };
-  uint16_t sizes[kinds] = {50, 70, 100, 112};
+  uint16_t sizes[kinds] = {50, 70, 90, 100};
 
   uint32_t inserting_cnt = INSERTING_N;
   std::vector<int> keys;
@@ -130,7 +131,7 @@ TEST_F(IndexTest, insert_delete_find_update) {
       "BPT is dynamic index!",
       "disk is managed as page!",
   };
-  uint16_t sizes[kinds] = {50, 70, 100, 112};
+  uint16_t sizes[kinds] = {50, 70, 90, 100};
 
   uint32_t inserting_cnt = INSERTING_N;
   std::vector<int> keys;
