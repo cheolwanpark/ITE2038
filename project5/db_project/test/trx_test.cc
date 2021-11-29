@@ -19,8 +19,8 @@ const long long RECORD_NUMBER = 10000;
 
 const int TRANSFER_COUNT = 10000;
 const int SCAN_COUNT = 100;
-const int TRANSFER_THREAD_NUM = 15;
-const int SCAN_THREAD_NUM = 3;
+const int TRANSFER_THREAD_NUM = 40;
+const int SCAN_THREAD_NUM = 5;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -39,6 +39,7 @@ class TrxTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    print_debugging_infos();
     shutdown_db();
     for (int i = 0; i < TABLE_NUMBER; ++i) {
       remove(_filename[i]);
@@ -109,7 +110,7 @@ void __transfer_thread_func(void *arg) {
       return;
     }
 
-    if ((i + 1) % 1000 == 0)
+    if ((i + 1) % 5000 == 0)
       LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
   }
   LOG_INFO("Transfer thread is done.");
@@ -149,7 +150,7 @@ void __scan_thread_func(void *arg) {
       ASSERT_EQ(sum_money, SUM_MONEY)
           << "Inconsistent state is detected in " << scan + 1 << "th scan!!";
     }
-    if ((scan + 1) % 10 == 0)
+    if ((scan + 1) % 50 == 0)
       LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
   }
   LOG_INFO("Scan thread is done.");
@@ -271,7 +272,7 @@ TEST_F(TrxTest, s_lock_only) {
 }
 
 // X lock only test
-constexpr int UPDATING_THREAD_NUM = 100;
+constexpr int UPDATING_THREAD_NUM = 50;
 constexpr int UPDATING_COUNT = 1000;
 
 constexpr char CHARSET[] =

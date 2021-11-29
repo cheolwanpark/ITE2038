@@ -37,4 +37,6 @@ lock_t* lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
 int lock_release(lock_t* lock_obj);
 trx_t* get_trx(lock_t* lock);
 
+void print_debugging_infos();
+
 #endif

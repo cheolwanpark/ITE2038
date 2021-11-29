@@ -16,6 +16,20 @@
 #include "index_manager/bpt.h"
 #include "log.h"
 
+// for debugging
+#define NTIME_CHECKING
+#ifdef TIME_CHECKING
+pthread_mutex_t runtime_map_latch = PTHREAD_MUTEX_INITIALIZER;
+std::vector<clock_t> lock_acq_runtime;
+std::vector<clock_t> lock_acq_wait_time;
+std::vector<clock_t> lock_rel_runtime;
+std::vector<clock_t> convert_runtime;
+std::vector<clock_t> trx_beg_runtime;
+std::vector<clock_t> trx_commit_runtime;
+std::vector<clock_t> trx_abort_runtime;
+std::vector<clock_t> trx_log_runtime;
+#endif
+
 // trx, lock relevent datatypes
 struct update_log_t {
   int64_t table_id;
@@ -31,6 +45,7 @@ struct trx_t {
   clock_t start_time;
   lock_t *head;
   update_log_t *log_head;
+  int releasing;
 };
 
 struct lock_list_t {
@@ -54,7 +69,6 @@ struct lock_t {
 // function definitions
 bool is_trx_assigned(trx_id_t id);
 int push_into_trx(trx_id_t trx_id, lock_t *lock);
-int __trx_abort(trx_id_t trx_id);
 lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id);
 lock_t *create_lock(int64_t record_id, int mode);
 void destroy_lock(lock_t *lock);
@@ -96,6 +110,10 @@ int push_into_trx(trx_id_t trx_id, lock_t *lock) {
 }
 
 int trx_begin() {
+#ifdef TIME_CHECKING
+  auto start = clock();
+#endif
+
   pthread_mutex_lock(&trx_table_latch);
   while (is_trx_assigned(trx_counter)) {
     ++trx_counter;
@@ -111,6 +129,7 @@ int trx_begin() {
   new_trx->start_time = clock();
   new_trx->head = NULL;
   new_trx->log_head = NULL;
+  new_trx->releasing = false;
   auto res = trx_table.emplace(new_trx->id, new_trx);
   if (!res.second) {
     pthread_mutex_unlock(&trx_table_latch);
@@ -120,19 +139,33 @@ int trx_begin() {
   ++trx_counter;
   if (trx_counter == INT_MAX) trx_counter = 1;
   pthread_mutex_unlock(&trx_table_latch);
+
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  trx_beg_runtime.push_back(clock() - start);
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
+
   return new_trx->id;
 }
 
 int trx_commit(trx_id_t trx_id) {
-  pthread_mutex_lock(&lock_table_latch);  // deadlock prevention
+#ifdef TIME_CHECKING
+  auto start = clock();
+#endif
+
   pthread_mutex_lock(&trx_table_latch);
   if (!is_trx_assigned(trx_id)) {
     pthread_mutex_unlock(&trx_table_latch);
-    pthread_mutex_unlock(&lock_table_latch);
     LOG_ERR("there is no trx with id = %d", trx_id);
     return 0;
   }
   auto *trx = trx_table[trx_id];
+  trx->releasing = true;
+
+  // erase from trx table
+  trx_table.erase(trx_id);
+  pthread_mutex_unlock(&trx_table_latch);
 
   // release all update logs
   auto *log_iter = trx->log_head;
@@ -145,6 +178,7 @@ int trx_commit(trx_id_t trx_id) {
 
   // release all locks
   auto *iter = trx->head;
+  pthread_mutex_lock(&lock_table_latch);
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
@@ -155,22 +189,37 @@ int trx_commit(trx_id_t trx_id) {
       return 0;
     }
   }
+  pthread_mutex_unlock(&lock_table_latch);
 
-  // erase from trx table and free trx
-  trx_table.erase(trx_id);
+  // free trx
   free(trx);
 
-  pthread_mutex_unlock(&trx_table_latch);
-  pthread_mutex_unlock(&lock_table_latch);
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  trx_commit_runtime.push_back(clock() - start);
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
+
   return trx_id;
 }
 
-int __trx_abort(trx_id_t trx_id) {
+int trx_abort(trx_id_t trx_id) {
+#ifdef TIME_CHECKING
+  auto start = clock();
+#endif
+
+  pthread_mutex_lock(&trx_table_latch);
   if (!is_trx_assigned(trx_id)) {
-    LOG_WARN("there is no trx with id = %d", trx_id);
+    pthread_mutex_unlock(&trx_table_latch);
+    LOG_ERR("there is no trx with id = %d", trx_id);
     return 0;
   }
   auto *trx = trx_table[trx_id];
+  trx->releasing = true;
+
+  // erase from trx table
+  trx_table.erase(trx_id);
+  pthread_mutex_unlock(&trx_table_latch);
 
   // revert all updates
   auto *log_iter = trx->log_head;
@@ -193,33 +242,27 @@ int __trx_abort(trx_id_t trx_id) {
 
   // release all locks
   auto *iter = trx->head;
+  pthread_mutex_lock(&lock_table_latch);
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
     if (__lock_release(current)) {
-      LOG_WARN("failed to release lock");
+      pthread_mutex_unlock(&lock_table_latch);
+      LOG_ERR("failed to release lock");
       return 0;
     }
   }
+  pthread_mutex_unlock(&lock_table_latch);
 
-  // erase from trx table and free trx
-  trx_table.erase(trx_id);
+  // free trx
   free(trx);
 
-  return trx_id;
-}
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  trx_abort_runtime.push_back(clock() - start);
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
 
-int trx_abort(trx_id_t trx_id) {
-  pthread_mutex_lock(&lock_table_latch);  // deadlock prevention
-  pthread_mutex_lock(&trx_table_latch);
-  if (__trx_abort(trx_id) != trx_id) {
-    pthread_mutex_unlock(&trx_table_latch);
-    pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to abort");
-    return 0;
-  }
-  pthread_mutex_unlock(&trx_table_latch);
-  pthread_mutex_unlock(&lock_table_latch);
   return trx_id;
 }
 
@@ -229,6 +272,11 @@ int trx_log_update(trx_t *trx, int64_t table_id, pagenum_t page_id,
     LOG_ERR("invalid parameters");
     return 1;
   }
+
+#ifdef TIME_CHECKING
+  auto start = clock();
+#endif
+
   // create update log object
   update_log_t *result = (update_log_t *)malloc(sizeof(update_log_t));
   if (result == NULL) {
@@ -250,6 +298,13 @@ int trx_log_update(trx_t *trx, int64_t table_id, pagenum_t page_id,
   // push it into transaction
   result->next = trx->log_head;
   trx->log_head = result;
+
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  trx_log_runtime.push_back(clock() - start);
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
+
   return 0;
 }
 
@@ -325,29 +380,31 @@ int push_into_lock_list(lock_list_t &lock_list, lock_t *lock) {
 }
 
 int remove_from_lock_list(lock_t *lock) {
-  if (lock == NULL || lock->sentinel == NULL) {
+  if (lock == NULL) {
     LOG_ERR("invalid parameters");
     return 1;
   }
   auto *sentinel = lock->sentinel;
   if (lock->prev != NULL) lock->prev->next = lock->next;
   if (lock->next != NULL) lock->next->prev = lock->prev;
-  if (sentinel->head == lock) sentinel->head = lock->next;
-  if (sentinel->tail == lock) sentinel->tail = lock->prev;
+  if (sentinel) {
+    if (sentinel->head == lock) sentinel->head = lock->next;
+    if (sentinel->tail == lock) sentinel->tail = lock->prev;
+  }
   return 0;
 }
 
 int init_lock_table() { return 0; }
 
 int free_lock_table() {
-  pthread_mutex_lock(&lock_table_latch);
   pthread_mutex_lock(&trx_table_latch);
   std::vector<trx_id_t> running_trx_ids;
   for (auto &iter : trx_table) {
     running_trx_ids.push_back(iter.first);
   }
+  pthread_mutex_unlock(&trx_table_latch);
   for (auto trx_id : running_trx_ids) {
-    if (__trx_abort(trx_id) != trx_id) {
+    if (trx_abort(trx_id) != trx_id) {
       pthread_mutex_unlock(&trx_table_latch);
       pthread_mutex_unlock(&lock_table_latch);
       LOG_ERR("failed to abort the trx %d", trx_id);
@@ -355,9 +412,9 @@ int free_lock_table() {
     }
   }
   trx_table.clear();
-  pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_destroy(&trx_table_latch);
 
+  pthread_mutex_lock(&lock_table_latch);
   for (auto &iter : lock_table) {
     auto *lock = iter.second.head;
     while (lock != NULL) {
@@ -385,6 +442,10 @@ struct leaf_slot_t {
 
 int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
                           trx_id_t trx_id) {
+#ifdef TIME_CHECKING
+  auto start = clock();
+#endif
+
   pthread_mutex_lock(&lock_table_latch);
   pthread_mutex_lock(&trx_table_latch);
 
@@ -438,12 +499,20 @@ int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
   unpin(table_id, page_id);
   pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_unlock(&lock_table_latch);
+
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  convert_runtime.push_back(clock() - start);
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
+
   return 0;
 }
 
 trx_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
                          int trx_id) {
   pthread_mutex_lock(&lock_table_latch);
+
   auto &lock_list = get_lock_list(table_id, page_id);
 
   // check if there is conflicting lock
@@ -499,7 +568,12 @@ trx_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
 
 lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
                      int trx_id, int lock_mode) {
+#ifdef TIME_CHECKING
+  auto start = clock();
+#endif
+
   pthread_mutex_lock(&lock_table_latch);
+
   auto &lock_list = get_lock_list(table_id, page_id);
 
   // check if trx already has a lock
@@ -529,9 +603,9 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
     return NULL;
   }
   if (is_deadlock(new_lock)) {
-    if (__trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
+    if (trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
     return NULL;
   }
   pthread_mutex_unlock(&trx_table_latch);
@@ -541,10 +615,29 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
     LOG_ERR("failed to push into the lock list");
     return NULL;
   }
+
+#ifdef TIME_CHECKING
+  auto start2 = clock();
+#endif
+
   if (find_conflicting_lock(new_lock) != NULL) {
     pthread_cond_wait(&new_lock->cond, &lock_table_latch);
   }
+
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  lock_acq_wait_time.push_back(clock() - start2);
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
+
   pthread_mutex_unlock(&lock_table_latch);
+
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  lock_acq_runtime.push_back(clock() - start);
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
+
   return new_lock;
 };
 
@@ -583,6 +676,10 @@ int lock_release(lock_t *lock_obj) {
     return 1;
   }
 
+#ifdef TIME_CHECKING
+  auto start = clock();
+#endif
+
   pthread_mutex_lock(&lock_table_latch);
   if (__lock_release(lock_obj)) {
     pthread_mutex_unlock(&lock_table_latch);
@@ -590,6 +687,13 @@ int lock_release(lock_t *lock_obj) {
     return 1;
   }
   pthread_mutex_unlock(&lock_table_latch);
+
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  lock_rel_runtime.push_back(clock() - start);
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
+
   return 0;
 }
 
@@ -648,7 +752,8 @@ int is_running(trx_t *trx) {
 
 int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
   // latches are already locked in is_deadlock
-  if (is_running(target_trx)) return false;
+  // if target trx is committed/aborted or not waiting, then not a deadlock
+  if (!is_trx_assigned(target_trx->id) || is_running(target_trx)) return false;
   auto *trx_lock_iter = target_trx->head;
   while (trx_lock_iter != NULL) {
     auto *sentinel = trx_lock_iter->sentinel;
@@ -684,7 +789,7 @@ int is_deadlock(lock_t *lock) {
   auto *checking_trx = lock->owner_trx;
   auto *iter = sentinel->head;
   while (iter != NULL && iter != lock) {
-    if (is_conflicting(iter, lock)) {
+    if (is_conflicting(iter, lock) && !iter->owner_trx->releasing) {
       if (is_deadlock(checking_trx, iter->owner_trx)) return true;
       // we don't have to check locks after first x lock
       if (iter->lock_mode == X_LOCK) break;
@@ -692,4 +797,27 @@ int is_deadlock(lock_t *lock) {
     iter = iter->next;
   }
   return false;
+}
+
+double calc_avg(const std::vector<clock_t> &v) {
+  double result = 0.0;
+  for (auto &val : v) {
+    result += (double)val / (double)v.size();
+  }
+  return (double)result / (double)CLOCKS_PER_SEC;
+}
+
+void print_debugging_infos() {
+#ifdef TIME_CHECKING
+  pthread_mutex_lock(&runtime_map_latch);
+  LOG_INFO("lock acq runtime : %.10llf", calc_avg(lock_acq_runtime));
+  LOG_INFO("lock acq wait time : %.10llf", calc_avg(lock_acq_wait_time));
+  LOG_INFO("lock rel runtime : %.10llf", calc_avg(lock_rel_runtime));
+  LOG_INFO("convert runtime : %.10llf", calc_avg(convert_runtime));
+  LOG_INFO("trx beg runtime : %.10llf", calc_avg(trx_beg_runtime));
+  LOG_INFO("trx com runtime : %.10llf", calc_avg(trx_commit_runtime));
+  LOG_INFO("trx abo runtime : %.10llf", calc_avg(trx_abort_runtime));
+  LOG_INFO("trx log runtime : %.10llf", calc_avg(trx_log_runtime));
+  pthread_mutex_unlock(&runtime_map_latch);
+#endif
 }
