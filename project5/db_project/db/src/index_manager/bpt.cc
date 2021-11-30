@@ -391,10 +391,10 @@ pagenum_t find_leaf(int64_t table_id, pagenum_t root, bpt_key_t key) {
       pagenum = page->internal_data.first_child_page;
     else
       pagenum = slots[idx - 1].pagenum;
-    unpin(table_id, old_pagenum);
+    unpin((page_t *)page);
     page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
   }
-  unpin(table_id, pagenum);
+  unpin((page_t *)page);
   return pagenum;
 }
 
@@ -1218,11 +1218,11 @@ bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
       if (size != NULL) *size = slots[i].size;
       if (value != NULL)
         memcpy(value, page->page.data + slots[i].offset, slots[i].size);
-      unpin(table_id, leaf_pagenum);
+      unpin((page_t *)page);
       return true;
     }
   }
-  unpin(table_id, leaf_pagenum);
+  unpin((page_t *)page);
   return false;
 }
 
@@ -1266,11 +1266,11 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
         memcpy(page->page.data + slots[i].offset, value, copy_size);
       }
       set_dirty((page_t *)page);
-      unpin(table_id, leaf_pagenum);
+      unpin((page_t *)page);
       return true;
     }
   }
-  unpin(table_id, leaf_pagenum);
+  unpin((page_t *)page);
   return false;
 }
 

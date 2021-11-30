@@ -37,10 +37,6 @@ int main(int argc, char** argv) {
     table_id[i] = file_open_table_file(filename[i]);
   }
 
-  for (int i = 0; i < TABLE_NUMBER; ++i) {
-    remove(filename[i]);
-  }
-
   srand(time(NULL));
 
   // initialize accounts
@@ -166,4 +162,8 @@ int main(int argc, char** argv) {
   LOG_INFO("complete in %llf seconds", (double)time / CLOCKS_PER_SEC);
 
   print_debugging_infos();
+
+  for (int i = 0; i < TABLE_NUMBER; ++i) {
+    remove(filename[i]);
+  }
 }

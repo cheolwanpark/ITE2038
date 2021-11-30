@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <map>
+#include <unordered_map>
 
 #include "log.h"
 
@@ -19,7 +20,13 @@ struct frame_t {
 };
 
 using frame_id_t = std::pair<int64_t, pagenum_t>;
-using frame_map_t = std::map<frame_id_t, frame_t *>;
+struct frame_map_hash {
+  template <class T1, class T2>
+  std::size_t operator()(const std::pair<T1, T2> &p) const {
+    return (p.first & 0x1f) | (p.second << 5);
+  }
+};
+using frame_map_t = std::unordered_map<frame_id_t, frame_t *, frame_map_hash>;
 frame_map_t frame_map;
 frame_t *frames = NULL, *head = NULL, *tail = NULL;
 
@@ -191,6 +198,11 @@ page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
 }
 
 void set_dirty(page_t *page) {
+  if (page == NULL) {
+    LOG_ERR("invalid parameters");
+    return;
+  }
+
   frame_t *frame = (frame_t *)page;
   frame->is_dirty = true;
 }
@@ -424,6 +436,19 @@ void unpin(int64_t table_id, pagenum_t pagenum) {
   }
 
   __unpin(table_id, pagenum);
+}
+
+void unpin(page_t *page) {
+  if (page == NULL) {
+    LOG_ERR("invalid parameters");
+    return;
+  }
+
+  frame_t *frame = (frame_t *)page;
+  if (pthread_mutex_unlock(&frame->page_latch)) {
+    LOG_ERR("failed to unlock page latch");
+    return;
+  }
 }
 
 void unpin_header(int64_t table_id) {

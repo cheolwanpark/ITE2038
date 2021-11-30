@@ -31,6 +31,7 @@ T *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
 }
 
 // set dirty flag on the frame ptr (gotten by buffer_get_page_ptr)
+// if someone putting an invalid ptr, then segfault will occur
 void set_dirty(page_t *page);
 
 // read specific page from the buffer and copy it to dest
@@ -54,6 +55,10 @@ void buffer_write_header_page(int64_t table_id, const header_page_t *src);
 // unpin(decrease pin count) specific page in the buffer
 // if buffer does not have that page, failed
 void unpin(int64_t table_id, pagenum_t pagenum);
+
+// unpin with frame ptr (gotten by buffer_get_page_ptr)
+// if someone putting an invalid ptr, then segfault will occur
+void unpin(page_t *page);
 
 // unpin(decrease pin count) header page in the buffer
 // just a wrapper of unpin
