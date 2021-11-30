@@ -20,6 +20,7 @@ int db_insert(int64_t table_id, int64_t key, char *value, uint16_t val_size) {
   if (root == 0) return 1;
   header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
   header->header.root_page_number = root != kNullPagenum ? root : 0;
+  set_dirty((page_t *)header);
   unpin(table_id, kHeaderPagenum);
 
   return 0;
@@ -68,6 +69,7 @@ int db_delete(int64_t table_id, int64_t key) {
   if (root == 0) return 1;
   header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
   header->header.root_page_number = root != kNullPagenum ? root : 0;
+  set_dirty((page_t *)header);
   unpin(table_id, kHeaderPagenum);
 
   return 0;

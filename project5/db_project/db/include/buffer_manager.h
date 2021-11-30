@@ -30,6 +30,9 @@ T *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
   return (T *)(buffer_get_page_ptr(table_id, pagenum));
 }
 
+// set dirty flag on the frame ptr (gotten by buffer_get_page_ptr)
+void set_dirty(page_t *page);
+
 // read specific page from the buffer and copy it to dest
 // just a wrapper of the buffer_get_page_ptr
 // return 0 on success

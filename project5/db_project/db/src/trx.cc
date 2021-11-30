@@ -228,6 +228,7 @@ int trx_abort(trx_id_t trx_id) {
     // overwrite records with log
     page = buffer_get_page_ptr<page_t>(log_iter->table_id, log_iter->page_id);
     memcpy(page->data + log_iter->offset, log_iter->bef, log_iter->len);
+    set_dirty((page_t *)page);
     unpin(log_iter->table_id, log_iter->page_id);
 
     // update iterator
@@ -461,6 +462,7 @@ int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
           is_trx_assigned(locking_trx_id)) {
         // remove implicit lock
         slots[i].trx_id = 0;
+        set_dirty((page_t *)page);
         unpin(table_id, page_id);
 
         // create explicit lock
@@ -554,6 +556,7 @@ trx_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
       slots[i].trx_id = trx_id;
+      set_dirty((page_t *)page);
       unpin(table_id, page_id);
       return trx;
     }

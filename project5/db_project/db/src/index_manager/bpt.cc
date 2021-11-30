@@ -1265,6 +1265,7 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
             new_val_size < slots[i].size ? new_val_size : slots[i].size;
         memcpy(page->page.data + slots[i].offset, value, copy_size);
       }
+      set_dirty((page_t *)page);
       unpin(table_id, leaf_pagenum);
       return true;
     }

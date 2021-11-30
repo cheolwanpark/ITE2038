@@ -164,4 +164,6 @@ int main(int argc, char** argv) {
 
   auto time = clock() - start;
   LOG_INFO("complete in %llf seconds", (double)time / CLOCKS_PER_SEC);
+
+  print_debugging_infos();
 }
