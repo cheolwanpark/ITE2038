@@ -223,12 +223,11 @@ int trx_abort(trx_id_t trx_id) {
 
   // revert all updates
   auto *log_iter = trx->log_head;
-  page_t page;
+  page_t *page;
   while (log_iter != NULL) {
     // overwrite records with log
-    buffer_read_page(log_iter->table_id, log_iter->page_id, &page);
-    memcpy(page.data + log_iter->offset, log_iter->bef, log_iter->len);
-    buffer_write_page(log_iter->table_id, log_iter->page_id, &page);
+    page = buffer_get_page_ptr<page_t>(log_iter->table_id, log_iter->page_id);
+    memcpy(page->data + log_iter->offset, log_iter->bef, log_iter->len);
     unpin(log_iter->table_id, log_iter->page_id);
 
     // update iterator
@@ -449,11 +448,9 @@ int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
   pthread_mutex_lock(&lock_table_latch);
   pthread_mutex_lock(&trx_table_latch);
 
-  bpt_page_t page;
-  buffer_read_page(table_id, page_id, &page.page);
-
-  leaf_slot_t *slots = (leaf_slot_t *)(page.page.data + kBptPageHeaderSize);
-  auto num_of_keys = page.header.num_of_keys;
+  auto *page = buffer_get_page_ptr<bpt_page_t>(table_id, page_id);
+  leaf_slot_t *slots = (leaf_slot_t *)(page->page.data + kBptPageHeaderSize);
+  auto num_of_keys = page->header.num_of_keys;
 
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
@@ -464,7 +461,7 @@ int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
           is_trx_assigned(locking_trx_id)) {
         // remove implicit lock
         slots[i].trx_id = 0;
-        buffer_write_page(table_id, page_id, &page.page);
+        unpin(table_id, page_id);
 
         // create explicit lock
         auto &lock_list = get_lock_list(table_id, page_id);
@@ -492,6 +489,9 @@ int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
           return 1;
         }
         // after converting, do nothing. (lock will be acquired outside)
+        pthread_mutex_unlock(&trx_table_latch);
+        pthread_mutex_unlock(&lock_table_latch);
+        return 0;
       }
       break;
     }
@@ -545,17 +545,15 @@ trx_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
   // add implicit lock
   // if there was an implicit lock it has already been converted into X lock by
   // convert_implicit_lock
-  bpt_page_t page;
-  buffer_read_page(table_id, page_id, &page.page);
+  auto *page = buffer_get_page_ptr<bpt_page_t>(table_id, page_id);
   pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_unlock(&lock_table_latch);
-  leaf_slot_t *slots = (leaf_slot_t *)(page.page.data + kBptPageHeaderSize);
-  auto num_of_keys = page.header.num_of_keys;
+  leaf_slot_t *slots = (leaf_slot_t *)(page->page.data + kBptPageHeaderSize);
+  auto num_of_keys = page->header.num_of_keys;
 
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
       slots[i].trx_id = trx_id;
-      buffer_write_page(table_id, page_id, &page.page);
       unpin(table_id, page_id);
       return trx;
     }

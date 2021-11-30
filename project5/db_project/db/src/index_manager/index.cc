@@ -13,17 +13,14 @@ int db_insert(int64_t table_id, int64_t key, char *value, uint16_t val_size) {
     LOG_ERR("invalid parameters");
     return 1;
   }
-  header_page_t header;
-  buffer_read_header_page(table_id, &header);
-
-  auto root = header.header.root_page_number;
-  unpin_header(table_id);
+  auto *header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  auto root = header->header.root_page_number;
+  unpin(table_id, kHeaderPagenum);
   root = bpt_insert(table_id, root, key, val_size, value);
   if (root == 0) return 1;
-  buffer_read_header_page(table_id, &header);
-  header.header.root_page_number = root != kNullPagenum ? root : 0;
-  buffer_write_header_page(table_id, &header);
-  unpin_header(table_id);
+  header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  header->header.root_page_number = root != kNullPagenum ? root : 0;
+  unpin(table_id, kHeaderPagenum);
 
   return 0;
 }
@@ -34,10 +31,9 @@ int db_find(int64_t table_id, int64_t key, char *ret_val, uint16_t *val_size,
     LOG_ERR("invalid parameters");
     return 1;
   }
-  header_page_t header;
-  buffer_read_header_page(table_id, &header);
-  auto root = header.header.root_page_number;
-  unpin_header(table_id);
+  auto *header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  auto root = header->header.root_page_number;
+  unpin(table_id, kHeaderPagenum);
   if (bpt_find(table_id, root, key, val_size, ret_val, trx_id))
     return 0;
   else
@@ -50,10 +46,9 @@ int db_update(int64_t table_id, int64_t key, char *values,
     LOG_ERR("invalid parameters");
     return 1;
   }
-  header_page_t header;
-  buffer_read_header_page(table_id, &header);
-  auto root = header.header.root_page_number;
-  unpin_header(table_id);
+  auto *header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  auto root = header->header.root_page_number;
+  unpin(table_id, kHeaderPagenum);
   if (bpt_update(table_id, root, key, values, new_val_size, old_val_size,
                  trx_id))
     return 0;
@@ -66,17 +61,14 @@ int db_delete(int64_t table_id, int64_t key) {
     LOG_ERR("invalid parameters");
     return 1;
   }
-  header_page_t header;
-  buffer_read_header_page(table_id, &header);
-
-  auto root = header.header.root_page_number;
-  unpin_header(table_id);
+  auto *header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  auto root = header->header.root_page_number;
+  unpin(table_id, kHeaderPagenum);
   root = bpt_delete(table_id, root, key);
   if (root == 0) return 1;
-  buffer_read_header_page(table_id, &header);
-  header.header.root_page_number = root != kNullPagenum ? root : 0;
-  buffer_write_header_page(table_id, &header);
-  unpin_header(table_id);
+  header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  header->header.root_page_number = root != kNullPagenum ? root : 0;
+  unpin(table_id, kHeaderPagenum);
 
   return 0;
 }

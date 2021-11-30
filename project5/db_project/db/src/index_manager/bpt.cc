@@ -377,21 +377,22 @@ pagenum_t find_leaf(int64_t table_id, pagenum_t root, bpt_key_t key) {
   if (root == 0) return 0;
 
   pagenum_t pagenum = root;
-  bpt_internal_page_t page;
-  buffer_read_page(table_id, pagenum, &page.page);
+  // bpt_internal_page_t page;
+  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
+  // buffer_read_page(table_id, pagenum, &page.page);
 
-  while (!page.internal_data.header.is_leaf) {
-    auto slots = internal_slot_array((bpt_internal_page_t *)&page);
-    auto num_of_keys = page.internal_data.header.num_of_keys;
+  while (!page->internal_data.header.is_leaf) {
+    auto slots = internal_slot_array(page);
+    auto num_of_keys = page->internal_data.header.num_of_keys;
     int idx = 0;
     while (idx < num_of_keys && slots[idx].key <= key) ++idx;
     auto old_pagenum = pagenum;
     if (idx == 0)
-      pagenum = page.internal_data.first_child_page;
+      pagenum = page->internal_data.first_child_page;
     else
       pagenum = slots[idx - 1].pagenum;
     unpin(table_id, old_pagenum);
-    buffer_read_page(table_id, pagenum, &page.page);
+    page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
   }
   unpin(table_id, pagenum);
   return pagenum;
@@ -1209,16 +1210,14 @@ bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
       return false;
     }
   }
-  bpt_leaf_page_t page;
-  buffer_read_page(table_id, leaf_pagenum, &page.page);
-
-  auto slots = leaf_slot_array(&page);
-  auto num_of_keys = page.leaf_data.header.num_of_keys;
+  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
+  auto slots = leaf_slot_array(page);
+  auto num_of_keys = page->leaf_data.header.num_of_keys;
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
       if (size != NULL) *size = slots[i].size;
       if (value != NULL)
-        memcpy(value, page.page.data + slots[i].offset, slots[i].size);
+        memcpy(value, page->page.data + slots[i].offset, slots[i].size);
       unpin(table_id, leaf_pagenum);
       return true;
     }
@@ -1249,15 +1248,14 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
     }
   }
 
-  bpt_leaf_page_t page;
-  buffer_read_page(table_id, leaf_pagenum, &page.page);
-  auto slots = leaf_slot_array(&page);
-  auto num_of_keys = page.leaf_data.header.num_of_keys;
+  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
+  auto slots = leaf_slot_array(page);
+  auto num_of_keys = page->leaf_data.header.num_of_keys;
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
       if (trx != NULL &&
           trx_log_update(trx, table_id, leaf_pagenum, slots[i].offset,
-                         new_val_size, page.page.data + slots[i].offset)) {
+                         new_val_size, page->page.data + slots[i].offset)) {
         LOG_ERR("failed to make update log on trx");
         return false;
       }
@@ -1265,8 +1263,7 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
       if (value != NULL) {
         auto copy_size =
             new_val_size < slots[i].size ? new_val_size : slots[i].size;
-        memcpy(page.page.data + slots[i].offset, value, copy_size);
-        buffer_write_page(table_id, leaf_pagenum, &page.page);
+        memcpy(page->page.data + slots[i].offset, value, copy_size);
       }
       unpin(table_id, leaf_pagenum);
       return true;

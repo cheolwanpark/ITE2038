@@ -19,6 +19,17 @@ pagenum_t buffer_alloc_page(int64_t table_id);
 // free page
 void buffer_free_page(int64_t table_id, pagenum_t pagenum);
 
+// get frame ptr (if there is no corresponding frame in buffer then load it)
+// return NULL on failed
+page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum);
+
+// get frame ptr (if there is no corresponding frame in buffer then load it)
+// return NULL on failed
+template <typename T>
+T *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
+  return (T *)(buffer_get_page_ptr(table_id, pagenum));
+}
+
 // read specific page from the buffer and copy it to dest
 // just a wrapper of the buffer_get_page_ptr
 // return 0 on success

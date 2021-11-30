@@ -35,10 +35,6 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum);
 // return NULL on failed
 frame_t *buffer_evict_frame();
 
-// get frame ptr (if there is no corresponding frame in buffer then load it)
-// return NULL on failed
-const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum);
-
 // find specific frame in buffer
 // return NULL on failed
 frame_t *find_frame(int64_t table_id, pagenum_t pagenum);
@@ -167,7 +163,7 @@ frame_t *buffer_evict_frame() {
   return iter;
 }
 
-const page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
+page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0) {
     LOG_ERR("invalid parameters");
     return NULL;
