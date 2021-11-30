@@ -82,8 +82,12 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx);
 int is_deadlock(lock_t *lock);
 
 // mutexes
-pthread_mutex_t trx_table_latch = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t lock_table_latch = PTHREAD_MUTEX_INITIALIZER;
+#ifdef __unix__
+#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER \
+  PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+#endif
+pthread_mutex_t trx_table_latch = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+pthread_mutex_t lock_table_latch = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
 
 // Transaction API relevent code
 int trx_counter = 1;
@@ -154,9 +158,11 @@ int trx_commit(trx_id_t trx_id) {
   auto start = clock();
 #endif
 
+  pthread_mutex_lock(&lock_table_latch);
   pthread_mutex_lock(&trx_table_latch);
   if (!is_trx_assigned(trx_id)) {
     pthread_mutex_unlock(&trx_table_latch);
+    pthread_mutex_unlock(&lock_table_latch);
     LOG_ERR("there is no trx with id = %d", trx_id);
     return 0;
   }
@@ -178,7 +184,6 @@ int trx_commit(trx_id_t trx_id) {
 
   // release all locks
   auto *iter = trx->head;
-  pthread_mutex_lock(&lock_table_latch);
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
@@ -208,9 +213,11 @@ int trx_abort(trx_id_t trx_id) {
   auto start = clock();
 #endif
 
+  pthread_mutex_lock(&lock_table_latch);
   pthread_mutex_lock(&trx_table_latch);
   if (!is_trx_assigned(trx_id)) {
     pthread_mutex_unlock(&trx_table_latch);
+    pthread_mutex_unlock(&lock_table_latch);
     LOG_ERR("there is no trx with id = %d", trx_id);
     return 0;
   }
@@ -242,7 +249,6 @@ int trx_abort(trx_id_t trx_id) {
 
   // release all locks
   auto *iter = trx->head;
-  pthread_mutex_lock(&lock_table_latch);
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
@@ -407,12 +413,12 @@ int init_lock_table() {
 }
 
 int free_lock_table() {
+  pthread_mutex_lock(&lock_table_latch);
   pthread_mutex_lock(&trx_table_latch);
   std::vector<trx_id_t> running_trx_ids;
   for (auto &iter : trx_table) {
     running_trx_ids.push_back(iter.first);
   }
-  pthread_mutex_unlock(&trx_table_latch);
   for (auto trx_id : running_trx_ids) {
     if (trx_abort(trx_id) != trx_id) {
       pthread_mutex_unlock(&trx_table_latch);
@@ -422,9 +428,9 @@ int free_lock_table() {
     }
   }
   trx_table.clear();
+  pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_destroy(&trx_table_latch);
 
-  pthread_mutex_lock(&lock_table_latch);
   for (auto &iter : lock_table) {
     auto *lock = iter.second.head;
     while (lock != NULL) {
@@ -614,9 +620,9 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
     return NULL;
   }
   if (is_deadlock(new_lock)) {
+    if (trx_abort(trx_id) != trx_id) LOG_WARN("failed to abort trx");
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    if (trx_abort(trx_id) != trx_id) LOG_ERR("failed to abort trx");
     return NULL;
   }
   pthread_mutex_unlock(&trx_table_latch);
