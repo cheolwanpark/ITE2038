@@ -310,6 +310,7 @@ int init_buffer_manager(int num_buf) {
   }
   pthread_mutex_lock(&frame_map_latch);
   frame_map.clear();
+  frame_map.reserve(num_buf);
   pthread_mutex_unlock(&frame_map_latch);
   pthread_mutex_unlock(&buffer_manager_latch);
   return 0;

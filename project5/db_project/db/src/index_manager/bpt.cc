@@ -1201,8 +1201,11 @@ bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
   if (leaf_pagenum == 0) return false;
 
   if (trx_id > 0) {  // acquire record lock before getting page latch
-    auto *lock =
-        lock_acquire_compression(table_id, leaf_pagenum, key, trx_id, S_LOCK);
+    if (convert_implicit_lock(table_id, leaf_pagenum, key, trx_id)) {
+      LOG_ERR("failed to convert implicit lock into explicit lock");
+      return false;
+    }
+    auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, S_LOCK);
     if (lock == NULL) {
       return false;
     }
@@ -1230,8 +1233,19 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
 
   trx_t *trx = NULL;
   if (trx_id > 0) {  // acquire record lock before getting page latch
-    trx = lock_acquire_compression(table_id, leaf_pagenum, key, trx_id, X_LOCK);
-    if (trx == NULL) return false;
+    // if there is no implicit lock, this function do not add lock
+    if (convert_implicit_lock(table_id, leaf_pagenum, key, trx_id)) {
+      LOG_ERR("failed to convert implicit lock into explicit lock");
+      return false;
+    }
+    trx = try_implicit_lock(table_id, leaf_pagenum, key, trx_id);
+    if (trx == NULL) {  // if failed to get implicit lock then get explicit lock
+      auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, X_LOCK);
+      if (lock == NULL) {
+        return false;
+      }
+      trx = get_trx(lock);
+    }
   }
 
   auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
