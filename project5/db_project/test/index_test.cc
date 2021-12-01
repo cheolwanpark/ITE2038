@@ -65,7 +65,6 @@ TEST_F(IndexTest, insert_and_find) {
               0)
         << "failed to insert " << key;
   }
-  ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
 
   for (auto key : keys) {
     ASSERT_EQ(db_find(table_id, key, read_buf, &size, DUMMY_TRX), 0)
@@ -75,7 +74,6 @@ TEST_F(IndexTest, insert_and_find) {
     ASSERT_TRUE(strcmp(read_buf, vals[key % kinds]) == 0)
         << "data of key = " << key << " is invalid";
   }
-  ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
 }
 
 TEST_F(IndexTest, insert_and_delete_all) {
@@ -106,19 +104,15 @@ TEST_F(IndexTest, insert_and_delete_all) {
               0)
         << "failed to insert " << key;
   }
-  ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
   LOG_INFO("insert complete!");
 
   shutdown_db();
   init_db(NUM_BUF);
   table_id = open_table(_filename);
-  ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
 
   for (auto key : keys) {
     ASSERT_EQ(db_delete(table_id, key), 0) << "failed to delete " << key;
-    // ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
   }
-  ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
 }
 
 TEST_F(IndexTest, insert_delete_find_update) {
@@ -149,7 +143,6 @@ TEST_F(IndexTest, insert_delete_find_update) {
               0)
         << "failed to insert " << key;
   }
-  ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
 
   char read_buf[112];
   uint16_t size;
@@ -173,12 +166,10 @@ TEST_F(IndexTest, insert_delete_find_update) {
       ASSERT_EQ(db_delete(table_id, key), 0);
     }
   }
-  ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
 
   shutdown_db();
   init_db(NUM_BUF);
   table_id = open_table(_filename);
-  ASSERT_TRUE(is_clean(table_id)) << "tree is invalid";
 
   for (int i = 0; i < keys.size() / 2; ++i) {
     auto key = keys[i];

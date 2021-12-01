@@ -15,7 +15,7 @@
 #include "log.h"
 
 const long long TABLE_NUMBER = 2;
-const long long RECORD_NUMBER = 5000;
+const long long RECORD_NUMBER = 10000;
 
 const int TRANSFER_COUNT = 10000;
 const int SCAN_COUNT = 100;

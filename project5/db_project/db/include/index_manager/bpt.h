@@ -41,9 +41,4 @@ pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,
 // return root (0 on failed)
 pagenum_t bpt_delete(int64_t table_id, pagenum_t root, bpt_key_t key);
 
-#include <limits.h>
-bool is_clean(int64_t table_id, pagenum_t root, pagenum_t parent = 0,
-              bpt_key_t min = INT_MIN, bpt_key_t max = INT_MAX,
-              bool is_root = true, bool is_first_child = false);
-
 #endif

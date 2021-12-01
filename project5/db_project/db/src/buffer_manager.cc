@@ -27,6 +27,8 @@ struct frame_map_hash {
 };
 using frame_map_t = std::unordered_map<frame_id_t, frame_t *, frame_map_hash>;
 frame_map_t frame_map;
+frame_t **frame_cache = NULL;
+uint32_t cache_size = 0;
 frame_t *frames = NULL, *head = NULL, *tail = NULL;
 
 pthread_mutex_t buffer_manager_latch = PTHREAD_MUTEX_INITIALIZER;
@@ -131,6 +133,8 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
     LOG_ERR("failed to emplace into the frame map");
     return NULL;
   }
+  auto hash_key = frame_map.hash_function()(frame_id);
+  frame_cache[hash_key % cache_size] = frame;
   pthread_mutex_unlock(&frame_map_latch);
   return frame;
 }
@@ -159,6 +163,11 @@ frame_t *buffer_evict_frame() {
   auto frame_id = std::make_pair(iter->table_id, iter->page_num);
   pthread_mutex_lock(&frame_map_latch);
   frame_map.erase(frame_id);
+  auto hash_key = frame_map.hash_function()(frame_id);
+  auto *cached_frame = frame_cache[hash_key % cache_size];
+  if (cached_frame != NULL && cached_frame->table_id == frame_id.first &&
+      cached_frame->page_num == frame_id.second)
+    frame_cache[hash_key % cache_size] = NULL;
   pthread_mutex_unlock(&frame_map_latch);
 
   // reset frame data
@@ -214,9 +223,18 @@ frame_t *find_frame(int64_t table_id, pagenum_t pagenum) {
 
   auto frame_id = std::make_pair(table_id, pagenum);
   pthread_mutex_lock(&frame_map_latch);
+  // check cache
+  auto hash_key = frame_map.hash_function()(frame_id);
+  auto *cached_frame = frame_cache[hash_key % cache_size];
+  if (cached_frame != NULL && cached_frame->table_id == frame_id.first &&
+      cached_frame->page_num == frame_id.second) {
+    pthread_mutex_unlock(&frame_map_latch);
+    return cached_frame;
+  }
 
   auto search = frame_map.find(frame_id);
   if (search != frame_map.end()) {
+    frame_cache[hash_key % cache_size] = search->second;
     pthread_mutex_unlock(&frame_map_latch);
     return search->second;
   } else {
@@ -310,7 +328,9 @@ int init_buffer_manager(int num_buf) {
   }
   pthread_mutex_lock(&frame_map_latch);
   frame_map.clear();
-  frame_map.reserve(num_buf);
+  cache_size = num_buf;
+  frame_cache = (frame_t **)malloc(sizeof(frame_t *) * cache_size);
+  memset(frame_cache, 0, sizeof(frame_t *) * cache_size);
   pthread_mutex_unlock(&frame_map_latch);
   pthread_mutex_unlock(&buffer_manager_latch);
   return 0;
@@ -334,6 +354,7 @@ int free_buffer_manager() {
   if (frames != NULL) free(frames);
   pthread_mutex_lock(&frame_map_latch);
   frame_map.clear();
+  if (frame_cache != NULL) free(frame_cache);
   pthread_mutex_unlock(&frame_map_latch);
   pthread_mutex_unlock(&buffer_manager_latch);
   return 0;
@@ -345,30 +366,29 @@ pagenum_t buffer_alloc_page(int64_t table_id) {
     return 0;
   }
 
-  header_page_t header_page;
-  __buffer_read_page(table_id, kHeaderPagenum, &header_page.page);
-  if (header_page.header.first_free_page == 0) {
+  auto *header_page =
+      buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  if (header_page->header.first_free_page == 0) {
     pagenum_t start = 0, end = 0;
     uint64_t num_new_pages = 0;
     if (file_expand_twice(table_id, &start, &end, &num_new_pages) ||
         start == 0) {
-      __unpin(table_id, kHeaderPagenum);
+      unpin(header_page);
       LOG_ERR("failed to expand file");
       return 0;
     }
     // connect expanded list into header page
-    header_page.header.first_free_page = start;
-    header_page.header.num_of_pages += num_new_pages;
+    header_page->header.first_free_page = start;
+    header_page->header.num_of_pages += num_new_pages;
   }
 
-  auto result = header_page.header.first_free_page;
-  page_node_t allocated_page;
-  __buffer_read_page(table_id, result, &allocated_page.page);
-  header_page.header.first_free_page = allocated_page.next_free_page;
-  __unpin(table_id, result);
+  auto result = header_page->header.first_free_page;
+  auto *allocated_page = buffer_get_page_ptr<page_node_t>(table_id, result);
+  header_page->header.first_free_page = allocated_page->next_free_page;
+  unpin(allocated_page);
 
-  __buffer_write_page(table_id, kHeaderPagenum, &header_page.page);
-  __unpin(table_id, kHeaderPagenum);
+  set_dirty(header_page);
+  unpin(header_page);
   return result;
 }
 
@@ -378,18 +398,17 @@ void buffer_free_page(int64_t table_id, pagenum_t pagenum) {
     return;
   }
 
-  header_page_t header_page;
-  page_node_t page_node;
-  __buffer_read_page(table_id, kHeaderPagenum, &header_page.page);
-  __buffer_read_page(table_id, pagenum, &page_node.page);
+  auto *header_page =
+      buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  auto *page_node = buffer_get_page_ptr<page_node_t>(table_id, pagenum);
 
-  page_node.next_free_page = header_page.header.first_free_page;
-  header_page.header.first_free_page = pagenum;
+  page_node->next_free_page = header_page->header.first_free_page;
+  header_page->header.first_free_page = pagenum;
 
-  __buffer_write_page(table_id, kHeaderPagenum, &header_page.page);
-  __buffer_write_page(table_id, pagenum, &page_node.page);
-  __unpin(table_id, kHeaderPagenum);
-  __unpin(table_id, pagenum);
+  set_dirty(header_page);
+  set_dirty(page_node);
+  unpin(header_page);
+  unpin(page_node);
 
   pthread_mutex_lock(&buffer_manager_latch);
   auto freed_frame = find_frame(table_id, pagenum);
