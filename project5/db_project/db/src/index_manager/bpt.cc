@@ -202,63 +202,66 @@ void init_internal_page_struct(bpt_internal_page_t *page,
 
 pagenum_t get_neighbor_pagenum(int64_t table_id, pagenum_t parent,
                                pagenum_t pagenum, bpt_key_t *key) {
-  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, parent);
-  auto num_of_keys = page->internal_data.header.num_of_keys;
-  auto slots = internal_slot_array(page);
+  bpt_internal_page_t page;
+  buffer_read_page(table_id, parent, &page.page);
+  auto num_of_keys = page.internal_data.header.num_of_keys;
+  auto slots = internal_slot_array(&page);
 
   if (num_of_keys == 0) {
-    unpin(page);
+    unpin(table_id, parent);
     LOG_ERR("num_of_keys is zero");
     return 0;
   }
 
-  if (page->internal_data.first_child_page == pagenum) {
+  if (page.internal_data.first_child_page == pagenum) {
     *key = slots[0].key;
-    unpin(page);
+    unpin(table_id, parent);
     return slots[0].pagenum;
   }
 
   if (slots[0].pagenum == pagenum) {
     *key = slots[0].key;
-    unpin(page);
-    return page->internal_data.first_child_page;
+    unpin(table_id, parent);
+    return page.internal_data.first_child_page;
   }
 
   for (int i = 1; i < num_of_keys; ++i) {
     if (slots[i].pagenum == pagenum) {
       *key = slots[i].key;
-      unpin(page);
+      unpin(table_id, parent);
       return slots[i - 1].pagenum;
     }
   }
 
-  unpin(page);
+  unpin(table_id, parent);
   LOG_ERR("there is no page %llu in parent page %llu", pagenum, parent);
   return 0;
 }
 
 void set_parent_page(int64_t table_id, pagenum_t pagenum, pagenum_t parent) {
-  auto *page = buffer_get_page_ptr<bpt_page_t>(table_id, pagenum);
-  page->header.parent_page = parent;
-  set_dirty(page);
-  unpin(page);
+  bpt_page_t page;
+  buffer_read_page(table_id, pagenum, &page.page);
+  page.header.parent_page = parent;
+  buffer_write_page(table_id, pagenum, &page.page);
+  unpin(table_id, pagenum);
 }
 
 bool change_key(int64_t table_id, pagenum_t pagenum, bpt_key_t from,
                 bpt_key_t to) {
-  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
-  auto num_of_keys = page->internal_data.header.num_of_keys;
-  auto slots = internal_slot_array(page);
+  bpt_internal_page_t page;
+  buffer_read_page(table_id, pagenum, &page.page);
+  auto num_of_keys = page.internal_data.header.num_of_keys;
+  auto slots = internal_slot_array(&page);
 
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == from) {
       slots[i].key = to;
-      set_dirty(page);
-      unpin(page);
+      buffer_write_page(table_id, pagenum, &page.page);
+      unpin(table_id, pagenum);
       return true;
     }
   }
-  unpin(page);
+  unpin(table_id, pagenum);
   LOG_ERR("cannot find key %d", from);
   return false;
 }
@@ -266,30 +269,30 @@ bool change_key(int64_t table_id, pagenum_t pagenum, bpt_key_t from,
 pagenum_t adjust_root(int64_t table_id, pagenum_t root) {
   if (root == 0) return root;
 
-  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, root);
+  bpt_internal_page_t page;
+  buffer_read_page(table_id, root, &page.page);
 
   // root is not empty
-  if (page->internal_data.header.num_of_keys > 0) {
-    unpin(page);
+  if (page.internal_data.header.num_of_keys > 0) {
+    unpin(table_id, root);
     return root;
   }
 
   // root is empty
   pagenum_t new_root;
   // root is not a leaf
-  if (!page->internal_data.header.is_leaf) {
-    unpin(page);
-    new_root = page->internal_data.first_child_page;
-    page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, new_root);
-    page->internal_data.header.parent_page = 0;
-    set_dirty(page);
-    unpin(page);
+  if (!page.internal_data.header.is_leaf) {
+    new_root = page.internal_data.first_child_page;
+    buffer_read_page(table_id, new_root, &page.page);
+    page.internal_data.header.parent_page = 0;
+    buffer_write_page(table_id, new_root, &page.page);
+    unpin(table_id, new_root);
   } else {
     // root is leaf
-    unpin(page);
     new_root = kNullPagenum;
   }
 
+  unpin(table_id, root);
   buffer_free_page(table_id, root);
 
   return new_root;
@@ -307,16 +310,17 @@ pagenum_t insert_into_new_root(int64_t table_id, pagenum_t left, bpt_key_t key,
     LOG_ERR("failed to allocate new page");
     return 0;
   }
-  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, root);
-  init_internal_page_struct(page, 0);
+  bpt_internal_page_t page;
+  buffer_read_page(table_id, root, &page.page);
+  init_internal_page_struct(&page, 0);
 
-  auto slots = internal_slot_array(page);
+  auto slots = internal_slot_array(&page);
   slots[0] = {key, right};
 
-  page->internal_data.first_child_page = left;
-  page->internal_data.header.num_of_keys = 1;
-  set_dirty(page);
-  unpin(page);
+  page.internal_data.first_child_page = left;
+  page.internal_data.header.num_of_keys = 1;
+  buffer_write_page(table_id, root, &page.page);
+  unpin(table_id, root);
 
   set_parent_page(table_id, left, root);
   set_parent_page(table_id, right, root);
@@ -329,21 +333,21 @@ pagenum_t insert_into_parent(int64_t table_id, pagenum_t root, pagenum_t parent,
   int left_index;
   if (parent == 0) return insert_into_new_root(table_id, left, key, right);
 
-  auto *parent_page =
-      buffer_get_page_ptr<bpt_internal_page_t>(table_id, parent);
+  bpt_internal_page_t parent_page;
+  buffer_read_page(table_id, parent, &parent_page.page);
 
   // find left index
   int left_idx = 0;
-  auto parent_num_of_keys = parent_page->internal_data.header.num_of_keys;
-  auto parent_slots = internal_slot_array(parent_page);
-  if (parent_page->internal_data.first_child_page == left)
+  auto parent_num_of_keys = parent_page.internal_data.header.num_of_keys;
+  auto parent_slots = internal_slot_array(&parent_page);
+  if (parent_page.internal_data.first_child_page == left)
     left_idx = -1;
   else {
     for (left_idx = 0; left_idx < parent_num_of_keys; ++left_idx) {
       if (parent_slots[left_idx].pagenum == left) break;
     }
     if (left_idx >= parent_num_of_keys) {
-      unpin(parent_page);
+      unpin(table_id, parent);
       LOG_ERR("failed to find left idx");
       return 0;
     }
@@ -351,19 +355,19 @@ pagenum_t insert_into_parent(int64_t table_id, pagenum_t root, pagenum_t parent,
 
   // simple case : the new key fits into the node
   if (parent_num_of_keys < kMaxNumInternalPageEntries) {
-    if (!insert_into_internal(table_id, parent, parent_page, left_idx, key,
+    if (!insert_into_internal(table_id, parent, &parent_page, left_idx, key,
                               right)) {
-      unpin(parent_page);
+      unpin(table_id, parent);
       LOG_ERR("failed to insert into internal page");
       return 0;
     }
-    set_dirty(parent_page);
-    unpin(parent_page);
+    buffer_write_page(table_id, parent, &parent_page.page);
+    unpin(table_id, parent);
     return root;
   }
 
   // harder case: split a parent node recursively
-  unpin(parent_page);
+  unpin(table_id, parent);
   pagenum_t sibling;
   return insert_into_internal_after_splitting(table_id, root, parent, &sibling,
                                               left_idx, key, right);
@@ -373,7 +377,9 @@ pagenum_t find_leaf(int64_t table_id, pagenum_t root, bpt_key_t key) {
   if (root == 0) return 0;
 
   pagenum_t pagenum = root;
+  // bpt_internal_page_t page;
   auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
+  // buffer_read_page(table_id, pagenum, &page.page);
 
   while (!page->internal_data.header.is_leaf) {
     auto slots = internal_slot_array(page);
@@ -466,31 +472,33 @@ pagenum_t insert_into_leaf_after_splitting(int64_t table_id, pagenum_t root,
     return 0;
   }
 
-  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, pagenum);
-  auto parent_page = page->leaf_data.header.parent_page;
-  auto old_num_of_keys = page->leaf_data.header.num_of_keys;
+  bpt_leaf_page_t page;
+  buffer_read_page(table_id, pagenum, &page.page);
+  auto parent_page = page.leaf_data.header.parent_page;
+  auto old_num_of_keys = page.leaf_data.header.num_of_keys;
 
   // check if leaf page is full
-  if (page->leaf_data.free_space >= sizeof(leaf_slot_t) + size) {
-    unpin(page);
+  if (page.leaf_data.free_space >= sizeof(leaf_slot_t) + size) {
+    unpin(table_id, pagenum);
     LOG_WARN("tried to split but page is not full, free: %u, required: %u",
-             page->leaf_data.free_space, sizeof(leaf_slot_t) + size);
+             page.leaf_data.free_space, sizeof(leaf_slot_t) + size);
     return 0;
   }
 
   // create new leaf page]
   *sibling = buffer_alloc_page(table_id);
   if (*sibling == 0) {
-    unpin(page);
+    unpin(table_id, pagenum);
     LOG_ERR("failed to allocate new sibling page");
     return 0;
   }
-  auto *new_page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, *sibling);
-  init_leaf_page_struct(new_page, parent_page);
+  bpt_leaf_page_t new_page;
+  buffer_read_page(table_id, *sibling, &new_page.page);
+  init_leaf_page_struct(&new_page, parent_page);
 
   // get slot arrays
-  auto slots = leaf_slot_array(page);
-  auto new_slots = leaf_slot_array(new_page);
+  auto slots = leaf_slot_array(&page);
+  auto new_slots = leaf_slot_array(&new_page);
 
   // find insertion index
   int insert_idx;
@@ -503,8 +511,8 @@ pagenum_t insert_into_leaf_after_splitting(int64_t table_id, pagenum_t root,
   auto temp_slots =
       (leaf_slot_t *)malloc(new_num_of_keys * sizeof(leaf_slot_t));
   if (temp_slots == NULL) {
-    unpin(page);
-    unpin(new_page);
+    unpin(table_id, pagenum);
+    unpin(table_id, *sibling);
     LOG_ERR("failed to allocate temp_slots array");
     return 0;
   }
@@ -542,24 +550,24 @@ pagenum_t insert_into_leaf_after_splitting(int64_t table_id, pagenum_t root,
       memcpy(upd_page.page.data + data_offset, value, temp_slots[i].size);
     else
       memcpy(upd_page.page.data + data_offset,
-             page->page.data + temp_slots[i].offset, temp_slots[i].size);
+             page.page.data + temp_slots[i].offset, temp_slots[i].size);
   }
 
   // insert into new page (sibling page)
   data_offset = kPageSize;
   for (int i = split + 1, j = 0; i < new_num_of_keys; ++i, ++j) {
-    new_page->leaf_data.free_space -= sizeof(leaf_slot_t) + temp_slots[i].size;
-    new_page->leaf_data.header.num_of_keys += 1;
+    new_page.leaf_data.free_space -= sizeof(leaf_slot_t) + temp_slots[i].size;
+    new_page.leaf_data.header.num_of_keys += 1;
 
     data_offset -= temp_slots[i].size;
     new_slots[j] = temp_slots[i];
     new_slots[j].offset = data_offset;
 
     if (i == insert_idx)
-      memcpy(new_page->page.data + data_offset, value, temp_slots[i].size);
+      memcpy(new_page.page.data + data_offset, value, temp_slots[i].size);
     else
-      memcpy(new_page->page.data + data_offset,
-             page->page.data + temp_slots[i].offset, temp_slots[i].size);
+      memcpy(new_page.page.data + data_offset,
+             page.page.data + temp_slots[i].offset, temp_slots[i].size);
   }
 
   // free allocated resources
@@ -567,24 +575,25 @@ pagenum_t insert_into_leaf_after_splitting(int64_t table_id, pagenum_t root,
 
   // update sibling pagenum
   upd_page.leaf_data.right_sibling = *sibling;
-  new_page->leaf_data.right_sibling = page->leaf_data.right_sibling;
+  new_page.leaf_data.right_sibling = page.leaf_data.right_sibling;
 
   // write
-  memcpy(page->page.data, upd_page.page.data, sizeof(upd_page));
-  set_dirty(page);
-  set_dirty(new_page);
-  unpin(page);
-  unpin(new_page);
+  buffer_write_page(table_id, pagenum, &upd_page.page);
+  buffer_write_page(table_id, *sibling, &new_page.page);
+  unpin(table_id, pagenum);
+  unpin(table_id, *sibling);
 
   auto mid_key = new_slots[0].key;
   return insert_into_parent(table_id, root, parent_page, pagenum, mid_key,
                             *sibling);
 }
 
-pagenum_t delete_entry_from_leaf(bpt_leaf_page_t *leaf_page, pagenum_t pagenum,
+pagenum_t delete_entry_from_leaf(int64_t table_id, pagenum_t pagenum,
                                  bpt_key_t key) {
-  auto num_of_keys = leaf_page->leaf_data.header.num_of_keys;
-  auto slots = leaf_slot_array(leaf_page);
+  bpt_leaf_page_t leaf_page;
+  buffer_read_page(table_id, pagenum, &leaf_page.page);
+  auto num_of_keys = leaf_page.leaf_data.header.num_of_keys;
+  auto slots = leaf_slot_array(&leaf_page);
 
   // find slot with given key
   int slotnum;
@@ -592,6 +601,7 @@ pagenum_t delete_entry_from_leaf(bpt_leaf_page_t *leaf_page, pagenum_t pagenum,
     if (slots[slotnum].key == key) break;
   }
   if (slotnum >= num_of_keys) {
+    unpin(table_id, pagenum);
     LOG_WARN("failed to find slot(key=%lld) from page %llu", key, pagenum);
     return 0;
   }
@@ -599,9 +609,9 @@ pagenum_t delete_entry_from_leaf(bpt_leaf_page_t *leaf_page, pagenum_t pagenum,
 
   // move slot data
   leaf_slot_t last_slot = slots[num_of_keys - 1];
-  move_memory(leaf_page->page.data, last_slot.offset, slots[slotnum].size,
+  move_memory(leaf_page.page.data, last_slot.offset, slots[slotnum].size,
               slots[slotnum].offset - last_slot.offset);
-  memset(leaf_page->page.data + last_slot.offset, 0, slots[slotnum].size);
+  memset(leaf_page.page.data + last_slot.offset, 0, slots[slotnum].size);
 
   // update slot metadata whose data are moved
   for (int i = 0; i < num_of_keys; ++i) {
@@ -617,51 +627,48 @@ pagenum_t delete_entry_from_leaf(bpt_leaf_page_t *leaf_page, pagenum_t pagenum,
   slots[num_of_keys - 1] = {0, 0, 0};
 
   // update header
-  leaf_page->leaf_data.header.num_of_keys -= 1;
-  leaf_page->leaf_data.free_space += freed_space;
+  leaf_page.leaf_data.header.num_of_keys -= 1;
+  leaf_page.leaf_data.free_space += freed_space;
 
-  set_dirty(leaf_page);
+  buffer_write_page(table_id, pagenum, &leaf_page.page);
+  unpin(table_id, pagenum);
   return pagenum;
 }
 
 pagenum_t delete_from_leaf(int64_t table_id, pagenum_t root, pagenum_t pagenum,
                            bpt_key_t key) {
-  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, pagenum);
-  pagenum = delete_entry_from_leaf(page, pagenum, key);
-  if (pagenum == 0) {
-    unpin(page);
-    return 0;
-  }
+  pagenum = delete_entry_from_leaf(table_id, pagenum, key);
+  if (pagenum == 0) return 0;
 
   // if delete from the root
-  if (root == pagenum) {
-    unpin(page);
-    return adjust_root(table_id, root);
-  }
+  if (root == pagenum) return adjust_root(table_id, root);
+
+  bpt_leaf_page_t page;
+  buffer_read_page(table_id, pagenum, &page.page);
 
   // if free space is less than threshold, do nothing
-  auto free_space = page->leaf_data.free_space;
+  auto free_space = page.leaf_data.free_space;
   if (free_space < kMergeOrDistributeThreshold) {
-    unpin(page);
+    unpin(table_id, pagenum);
     return root;
   }
 
   bpt_key_t key_in_parent;
   auto neighbor_pagenum = get_neighbor_pagenum(
-      table_id, page->leaf_data.header.parent_page, pagenum, &key_in_parent);
+      table_id, page.leaf_data.header.parent_page, pagenum, &key_in_parent);
   if (neighbor_pagenum == 0) {
-    unpin(page);
+    unpin(table_id, pagenum);
     LOG_ERR("failed to find neighbor page");
     return 0;
   }
 
-  auto *neighbor_page =
-      buffer_get_page_ptr<bpt_leaf_page_t>(table_id, neighbor_pagenum);
+  bpt_leaf_page_t neighbor_page;
+  buffer_read_page(table_id, neighbor_pagenum, &neighbor_page.page);
 
-  if (neighbor_page->leaf_data.header.parent_page !=
-      page->leaf_data.header.parent_page) {
-    unpin(page);
-    unpin(neighbor_page);
+  if (neighbor_page.leaf_data.header.parent_page !=
+      page.leaf_data.header.parent_page) {
+    unpin(table_id, pagenum);
+    unpin(table_id, neighbor_pagenum);
     LOG_ERR("parent is not same");
     return 0;
   }
@@ -669,15 +676,15 @@ pagenum_t delete_from_leaf(int64_t table_id, pagenum_t root, pagenum_t pagenum,
   uint64_t used_space = (kPageSize - kBptPageHeaderSize) - free_space;
 
   // if there is enough space, then merge
-  if (used_space <= neighbor_page->leaf_data.free_space) {
-    unpin(page);
-    unpin(neighbor_page);
+  if (used_space <= neighbor_page.leaf_data.free_space) {
+    unpin(table_id, pagenum);
+    unpin(table_id, neighbor_pagenum);
     return merge_leaf(table_id, root, key_in_parent, pagenum, neighbor_pagenum);
   }
   // if there is no enough space, then redistribute
   else {
-    unpin(page);
-    unpin(neighbor_page);
+    unpin(table_id, pagenum);
+    unpin(table_id, neighbor_pagenum);
     return redistribute_leaf(table_id, root, key_in_parent, pagenum,
                              neighbor_pagenum);
   }
@@ -685,16 +692,16 @@ pagenum_t delete_from_leaf(int64_t table_id, pagenum_t root, pagenum_t pagenum,
 
 pagenum_t merge_leaf(int64_t table_id, pagenum_t root, bpt_key_t key_in_parent,
                      pagenum_t pagenum, pagenum_t neighbor_pagenum) {
-  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, pagenum);
-  auto *neighbor =
-      buffer_get_page_ptr<bpt_leaf_page_t>(table_id, neighbor_pagenum);
+  bpt_leaf_page_t page, neighbor;
+  buffer_read_page(table_id, pagenum, &page.page);
+  buffer_read_page(table_id, neighbor_pagenum, &neighbor.page);
 
-  auto slots = leaf_slot_array(page);
-  auto neig_slots = leaf_slot_array(neighbor);
+  auto slots = leaf_slot_array(&page);
+  auto neig_slots = leaf_slot_array(&neighbor);
 
   auto page_is_left = true;
   auto left_pagenum = pagenum, right_pagenum = neighbor_pagenum;
-  bpt_leaf_page_t *left = page, *right = neighbor;
+  bpt_leaf_page_t *left = &page, *right = &neighbor;
   auto left_slots = slots, right_slots = neig_slots;
   if (right_slots[0].key < left_slots[0].key) {
     std::swap(left_pagenum, right_pagenum);
@@ -704,14 +711,13 @@ pagenum_t merge_leaf(int64_t table_id, pagenum_t root, bpt_key_t key_in_parent,
   }
   auto left_num_of_keys = left->leaf_data.header.num_of_keys;
   auto right_num_of_keys = right->leaf_data.header.num_of_keys;
-  auto parent_pagenum = right->leaf_data.header.parent_page;
 
   // copy right page's slots into left page
   for (int i = 0; i < right_num_of_keys; ++i) {
     if (!insert_into_leaf(left, right_slots[i].key, right_slots[i].size,
                           right->page.data + right_slots[i].offset)) {
-      unpin(page);
-      unpin(neighbor);
+      unpin(table_id, pagenum);
+      unpin(table_id, neighbor_pagenum);
       LOG_ERR("failed to insert");
       return 0;
     }
@@ -721,31 +727,30 @@ pagenum_t merge_leaf(int64_t table_id, pagenum_t root, bpt_key_t key_in_parent,
   left->leaf_data.right_sibling = right->leaf_data.right_sibling;
 
   // free right page and delete from parent
-  set_dirty(left);
-  unpin(page);
-  unpin(neighbor);
+  buffer_write_page(table_id, left_pagenum, &left->page);
+  unpin(table_id, pagenum);
+  unpin(table_id, neighbor_pagenum);
   buffer_free_page(table_id, right_pagenum);
-  return delete_from_parent(table_id, root, parent_pagenum, key_in_parent,
-                            right_pagenum);
+  return delete_from_parent(table_id, root, right->leaf_data.header.parent_page,
+                            key_in_parent, right_pagenum);
 }
 
 pagenum_t redistribute_leaf(int64_t table_id, pagenum_t root,
                             bpt_key_t key_in_parent, pagenum_t pagenum,
                             pagenum_t neighbor_pagenum) {
-  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, pagenum);
-  auto *neighbor =
-      buffer_get_page_ptr<bpt_leaf_page_t>(table_id, neighbor_pagenum);
-  bpt_leaf_page_t upd_neighbor;
-  auto parent_page = page->leaf_data.header.parent_page;
+  bpt_leaf_page_t page, neighbor, upd_neighbor;
+  buffer_read_page(table_id, pagenum, &page.page);
+  buffer_read_page(table_id, neighbor_pagenum, &neighbor.page);
+  auto parent_page = page.leaf_data.header.parent_page;
   init_leaf_page_struct(&upd_neighbor, parent_page);
-  upd_neighbor.leaf_data.right_sibling = neighbor->leaf_data.right_sibling;
+  upd_neighbor.leaf_data.right_sibling = neighbor.leaf_data.right_sibling;
 
-  auto slots = leaf_slot_array(page);
-  auto neig_slots = leaf_slot_array(neighbor);
+  auto slots = leaf_slot_array(&page);
+  auto neig_slots = leaf_slot_array(&neighbor);
   auto upd_neig_slots = leaf_slot_array(&upd_neighbor);
 
   auto page_is_left = true;
-  bpt_leaf_page_t *left = page, *right = neighbor;
+  bpt_leaf_page_t *left = &page, *right = &neighbor;
   auto left_slots = slots, right_slots = neig_slots;
   if (right_slots[0].key < left_slots[0].key) {
     std::swap(left, right);
@@ -766,8 +771,8 @@ pagenum_t redistribute_leaf(int64_t table_id, pagenum_t root,
       // cause maximum slot.size is 108, space is always enough
       if (!insert_into_leaf(left, slot.key, slot.size,
                             right->page.data + slot.offset)) {
-        unpin(page);
-        unpin(neighbor);
+        unpin(table_id, pagenum);
+        unpin(table_id, neighbor_pagenum);
         LOG_ERR("failed to insert slot into left page %llu", pagenum);
         return 0;
       }
@@ -794,8 +799,8 @@ pagenum_t redistribute_leaf(int64_t table_id, pagenum_t root,
       auto slot = left_slots[left_idx--];
       if (!insert_into_leaf(right, slot.key, slot.size,
                             left->page.data + slot.offset)) {
-        unpin(page);
-        unpin(neighbor);
+        unpin(table_id, pagenum);
+        unpin(table_id, neighbor_pagenum);
         LOG_ERR("failed to insert slot into right page %llu", pagenum);
         return 0;
       }
@@ -816,11 +821,10 @@ pagenum_t redistribute_leaf(int64_t table_id, pagenum_t root,
     new_key_in_parent = right_slots[0].key;
   }
 
-  memcpy(neighbor->page.data, upd_neighbor.page.data, sizeof(upd_neighbor));
-  set_dirty(page);
-  set_dirty(neighbor);
-  unpin(page);
-  unpin(neighbor);
+  buffer_write_page(table_id, pagenum, &page.page);
+  buffer_write_page(table_id, neighbor_pagenum, &upd_neighbor.page);
+  unpin(table_id, pagenum);
+  unpin(table_id, neighbor_pagenum);
   change_key(table_id, parent_page, key_in_parent, new_key_in_parent);
 
   return root;
@@ -870,13 +874,14 @@ pagenum_t insert_into_internal_after_splitting(int64_t table_id, pagenum_t root,
     return 0;
   }
 
-  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
-  auto parent_page = page->internal_data.header.parent_page;
-  auto old_num_of_keys = page->internal_data.header.num_of_keys;
+  bpt_internal_page_t page;
+  buffer_read_page(table_id, pagenum, &page.page);
+  auto parent_page = page.internal_data.header.parent_page;
+  auto old_num_of_keys = page.internal_data.header.num_of_keys;
 
   // check if page is full
   if (old_num_of_keys < kMaxNumInternalPageEntries) {
-    unpin(page);
+    unpin(table_id, pagenum);
     LOG_WARN("tried to split but page is not full");
     return 0;
   }
@@ -884,24 +889,25 @@ pagenum_t insert_into_internal_after_splitting(int64_t table_id, pagenum_t root,
   // create new internal page
   *sibling = buffer_alloc_page(table_id);
   if (*sibling == 0) {
-    unpin(page);
+    unpin(table_id, pagenum);
     LOG_ERR("failed to allocate new sibling page");
     return 0;
   }
-  auto *new_page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, *sibling);
-  init_internal_page_struct(new_page, parent_page);
+  bpt_internal_page_t new_page;
+  buffer_read_page(table_id, *sibling, &new_page.page);
+  init_internal_page_struct(&new_page, parent_page);
 
   // get slot arrays
-  auto slots = internal_slot_array(page);
-  auto new_slots = internal_slot_array(new_page);
+  auto slots = internal_slot_array(&page);
+  auto new_slots = internal_slot_array(&new_page);
 
   // initialize temp_slots array
   auto new_num_of_keys = old_num_of_keys + 1;
   auto temp_slots =
       (internal_slot_t *)malloc(new_num_of_keys * sizeof(internal_slot_t));
   if (temp_slots == NULL) {
-    unpin(page);
-    unpin(new_page);
+    unpin(table_id, pagenum);
+    unpin(table_id, *sibling);
     LOG_ERR("failed to allocate temp_slots array");
     return 0;
   }
@@ -922,8 +928,7 @@ pagenum_t insert_into_internal_after_splitting(int64_t table_id, pagenum_t root,
   auto upd_slots = internal_slot_array(&upd_page);
 
   // insert into updated page (alter page)
-  upd_page.internal_data.first_child_page =
-      page->internal_data.first_child_page;
+  upd_page.internal_data.first_child_page = page.internal_data.first_child_page;
   int i = 0;
   for (i = 0; i < split; ++i) {
     upd_page.internal_data.header.num_of_keys += 1;
@@ -931,11 +936,11 @@ pagenum_t insert_into_internal_after_splitting(int64_t table_id, pagenum_t root,
   }
 
   // insert into new page (sibling page)
-  new_page->internal_data.first_child_page = temp_slots[i].pagenum;
+  new_page.internal_data.first_child_page = temp_slots[i].pagenum;
   set_parent_page(table_id, temp_slots[i].pagenum, *sibling);
   auto mid_key = temp_slots[i++].key;
   for (int j = 0; i < new_num_of_keys; ++i, ++j) {
-    new_page->internal_data.header.num_of_keys += 1;
+    new_page.internal_data.header.num_of_keys += 1;
     new_slots[j] = temp_slots[i];
     set_parent_page(table_id, temp_slots[i].pagenum, *sibling);
   }
@@ -944,21 +949,21 @@ pagenum_t insert_into_internal_after_splitting(int64_t table_id, pagenum_t root,
   free(temp_slots);
 
   // write
-  memcpy(page->page.data, upd_page.page.data, sizeof(upd_page));
-  set_dirty(page);
-  set_dirty(new_page);
-  unpin(page);
-  unpin(new_page);
+  buffer_write_page(table_id, pagenum, &upd_page.page);
+  buffer_write_page(table_id, *sibling, &new_page.page);
+  unpin(table_id, pagenum);
+  unpin(table_id, *sibling);
 
   return insert_into_parent(table_id, root, parent_page, pagenum, mid_key,
                             *sibling);
 }
 
-pagenum_t delete_entry_from_internal(bpt_internal_page_t *page,
-                                     pagenum_t pagenum, bpt_key_t key,
-                                     pagenum_t child) {
-  auto num_of_keys = page->internal_data.header.num_of_keys;
-  auto slots = internal_slot_array(page);
+pagenum_t delete_entry_from_internal(int64_t table_id, pagenum_t pagenum,
+                                     bpt_key_t key, pagenum_t child) {
+  bpt_internal_page_t page;
+  buffer_read_page(table_id, pagenum, &page.page);
+  auto num_of_keys = page.internal_data.header.num_of_keys;
+  auto slots = internal_slot_array(&page);
 
   // find key idx
   int key_idx;
@@ -966,13 +971,14 @@ pagenum_t delete_entry_from_internal(bpt_internal_page_t *page,
     if (slots[key_idx].key == key) break;
   }
   if (key_idx >= num_of_keys) {
-    LOG_WARN("failed to find a slot(key=%d, page: %llu)", key, child);
+    unpin(table_id, pagenum);
+    LOG_ERR("failed to find a slot(key=%d, page: %llu)", key, child);
     return 0;
   }
 
   // check if removing child is right
   auto removing_right = true;
-  if (key_idx == 0 && page->internal_data.first_child_page == child)
+  if (key_idx == 0 && page.internal_data.first_child_page == child)
     removing_right = false;
   if (key_idx > 0 && slots[key_idx - 1].pagenum == child)
     removing_right = false;
@@ -980,12 +986,13 @@ pagenum_t delete_entry_from_internal(bpt_internal_page_t *page,
   // remove key and child pagenum
   if (removing_right) {
     if (slots[key_idx].pagenum != child) {
-      LOG_WARN("failed to find a slot(key=%d, page: %llu)", key, child);
+      unpin(table_id, pagenum);
+      LOG_ERR("failed to find a slot(key=%d, page: %llu)", key, child);
       return 0;
     }
   } else {
     if (key_idx == 0)
-      page->internal_data.first_child_page = slots[0].pagenum;
+      page.internal_data.first_child_page = slots[0].pagenum;
     else
       slots[key_idx - 1].pagenum = slots[key_idx].pagenum;
   }
@@ -993,71 +1000,68 @@ pagenum_t delete_entry_from_internal(bpt_internal_page_t *page,
     slots[i] = slots[i + 1];
   }
   slots[num_of_keys - 1] = {0, 0};
-  page->internal_data.header.num_of_keys -= 1;
+  page.internal_data.header.num_of_keys -= 1;
 
-  set_dirty(page);
+  buffer_write_page(table_id, pagenum, &page.page);
+  unpin(table_id, pagenum);
   return pagenum;
 }
 
 pagenum_t delete_from_parent(int64_t table_id, pagenum_t root,
                              pagenum_t pagenum, bpt_key_t key, pagenum_t val) {
-  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
-  pagenum = delete_entry_from_internal(page, pagenum, key, val);
+  pagenum = delete_entry_from_internal(table_id, pagenum, key, val);
   if (pagenum == 0) {
-    unpin(page);
     LOG_ERR("failed to delete entry from internal page");
     return 0;
   }
 
   // if delete from the root
-  if (root == pagenum) {
-    unpin(page);
-    return adjust_root(table_id, root);
-  }
+  if (root == pagenum) return adjust_root(table_id, root);
 
-  auto num_of_keys = page->internal_data.header.num_of_keys;
+  bpt_internal_page_t page;
+  buffer_read_page(table_id, pagenum, &page.page);
+  auto num_of_keys = page.internal_data.header.num_of_keys;
 
   // if page has enough keys
   const auto min_keys =
       kMaxNumInternalPageEntries / 2 + kMaxNumInternalPageEntries % 2 - 1;
   if (num_of_keys >= min_keys) {
-    unpin(page);
+    unpin(table_id, pagenum);
     return root;
   }
 
   bpt_key_t key_in_parent;
-  auto neighbor_pagenum =
-      get_neighbor_pagenum(table_id, page->internal_data.header.parent_page,
-                           pagenum, &key_in_parent);
+  auto neighbor_pagenum = get_neighbor_pagenum(
+      table_id, page.internal_data.header.parent_page, pagenum, &key_in_parent);
   if (neighbor_pagenum == 0) {
-    unpin(page);
+    unpin(table_id, pagenum);
     LOG_ERR("failed to find neighbor page");
     return 0;
   }
 
-  auto *neighbor_page =
-      buffer_get_page_ptr<bpt_internal_page_t>(table_id, neighbor_pagenum);
-  auto neig_num_of_keys = neighbor_page->internal_data.header.num_of_keys;
+  bpt_internal_page_t neighbor_page;
+  buffer_read_page(table_id, neighbor_pagenum, &neighbor_page.page);
+  auto neig_num_of_keys = neighbor_page.internal_data.header.num_of_keys;
 
-  if (neighbor_page->internal_data.header.parent_page !=
-      page->internal_data.header.parent_page) {
-    unpin(page);
-    unpin(neighbor_page);
+  if (neighbor_page.internal_data.header.parent_page !=
+      page.internal_data.header.parent_page) {
+    unpin(table_id, pagenum);
+    unpin(table_id, neighbor_pagenum);
     LOG_ERR("parent is not same");
     return 0;
   }
 
   // if there is enough space, then merge
   if (num_of_keys + neig_num_of_keys < kMaxNumInternalPageEntries) {
-    unpin(page);
-    unpin(neighbor_page);
+    unpin(table_id, pagenum);
+    unpin(table_id, neighbor_pagenum);
     return merge_internal(table_id, root, key_in_parent, pagenum,
                           neighbor_pagenum);
   }
   // if there is no enough space, then redistribute
   else {
-    unpin(page);
-    unpin(neighbor_page);
+    unpin(table_id, pagenum);
+    unpin(table_id, neighbor_pagenum);
     return redistribute_internal(table_id, root, key_in_parent, pagenum,
                                  neighbor_pagenum);
   }
@@ -1068,14 +1072,14 @@ pagenum_t delete_from_parent(int64_t table_id, pagenum_t root,
 pagenum_t merge_internal(int64_t table_id, pagenum_t root,
                          bpt_key_t key_in_parent, pagenum_t pagenum,
                          pagenum_t neighbor_pagenum) {
-  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
-  auto *neighbor =
-      buffer_get_page_ptr<bpt_internal_page_t>(table_id, neighbor_pagenum);
-  auto parent_pagenum = page->internal_data.header.parent_page;
+  bpt_internal_page_t page, neighbor;
+  buffer_read_page(table_id, pagenum, &page.page);
+  buffer_read_page(table_id, neighbor_pagenum, &neighbor.page);
+  auto parent_pagenum = page.internal_data.header.parent_page;
 
   auto page_is_left = true;
   auto left_pagenum = pagenum, right_pagenum = neighbor_pagenum;
-  auto left = page, right = neighbor;
+  auto left = &page, right = &neighbor;
   auto left_slots = internal_slot_array(left);
   auto right_slots = internal_slot_array(right);
   if (right_slots[0].key < left_slots[0].key) {
@@ -1092,8 +1096,8 @@ pagenum_t merge_internal(int64_t table_id, pagenum_t root,
   if (!insert_into_internal(table_id, left_pagenum, left, left_idx++,
                             key_in_parent,
                             right->internal_data.first_child_page)) {
-    unpin(page);
-    unpin(neighbor);
+    unpin(table_id, pagenum);
+    unpin(table_id, neighbor_pagenum);
     LOG_ERR("failed to insert");
     return 0;
   }
@@ -1103,16 +1107,16 @@ pagenum_t merge_internal(int64_t table_id, pagenum_t root,
     auto slot = right_slots[i];
     if (!insert_into_internal(table_id, left_pagenum, left, left_idx++,
                               slot.key, slot.pagenum)) {
-      unpin(page);
-      unpin(neighbor);
+      unpin(table_id, pagenum);
+      unpin(table_id, neighbor_pagenum);
       LOG_ERR("failed to insert");
       return 0;
     }
   }
 
-  set_dirty(left);
-  unpin(page);
-  unpin(neighbor);
+  buffer_write_page(table_id, left_pagenum, &left->page);
+  unpin(table_id, pagenum);
+  unpin(table_id, neighbor_pagenum);
   buffer_free_page(table_id, right_pagenum);
   return delete_from_parent(table_id, root, parent_pagenum, key_in_parent,
                             right_pagenum);
@@ -1121,14 +1125,14 @@ pagenum_t merge_internal(int64_t table_id, pagenum_t root,
 pagenum_t redistribute_internal(int64_t table_id, pagenum_t root,
                                 bpt_key_t key_in_parent, pagenum_t pagenum,
                                 pagenum_t neighbor_pagenum) {
-  auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
-  auto *neighbor =
-      buffer_get_page_ptr<bpt_internal_page_t>(table_id, neighbor_pagenum);
-  auto parent_pagenum = page->internal_data.header.parent_page;
+  bpt_internal_page_t page, neighbor;
+  buffer_read_page(table_id, pagenum, &page.page);
+  buffer_read_page(table_id, neighbor_pagenum, &neighbor.page);
+  auto parent_pagenum = page.internal_data.header.parent_page;
 
   auto page_is_left = true;
   auto left_pagenum = pagenum, right_pagenum = neighbor_pagenum;
-  auto left = page, right = neighbor;
+  auto left = &page, right = &neighbor;
   auto left_slots = internal_slot_array(left);
   auto right_slots = internal_slot_array(right);
   if (right_slots[0].key < left_slots[0].key) {
@@ -1146,8 +1150,8 @@ pagenum_t redistribute_internal(int64_t table_id, pagenum_t root,
     if (!insert_into_internal(table_id, left_pagenum, left,
                               left_num_of_keys - 1, key_in_parent,
                               right_first_page)) {
-      unpin(page);
-      unpin(neighbor);
+      unpin(table_id, pagenum);
+      unpin(table_id, neighbor_pagenum);
       LOG_ERR("failed to insert");
       return 0;
     }
@@ -1182,10 +1186,10 @@ pagenum_t redistribute_internal(int64_t table_id, pagenum_t root,
     left->internal_data.header.num_of_keys -= 1;
   }
 
-  set_dirty(page);
-  set_dirty(neighbor);
-  unpin(page);
-  unpin(neighbor);
+  buffer_write_page(table_id, pagenum, &page.page);
+  buffer_write_page(table_id, neighbor_pagenum, &neighbor.page);
+  unpin(table_id, pagenum);
+  unpin(table_id, neighbor_pagenum);
 
   return root;
 }
@@ -1273,6 +1277,7 @@ pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,
     return 0;
   }
 
+  bpt_leaf_page_t page;
   auto required_space = sizeof(leaf_slot_t) + size;
 
   // if there is no root, then create new root
@@ -1282,41 +1287,39 @@ pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,
       LOG_ERR("failed to allocate new page");
       return 0;
     }
-
-    auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, root);
-    init_leaf_page_struct(page, 0);
-    auto slots = leaf_slot_array(page);
+    buffer_read_page(table_id, root, &page.page);
+    init_leaf_page_struct(&page, 0);
+    auto slots = leaf_slot_array(&page);
 
     uint16_t offset = kPageSize - size;
     slots[0] = {key, size, offset};
-    memcpy(page->page.data + offset, value, size);
-    page->leaf_data.free_space -= required_space;
-    page->leaf_data.header.num_of_keys += 1;
+    memcpy(page.page.data + offset, value, size);
+    page.leaf_data.free_space -= required_space;
+    page.leaf_data.header.num_of_keys += 1;
 
-    set_dirty(page);
-    unpin(page);
+    buffer_write_page(table_id, root, &page.page);
+    unpin(table_id, root);
     return root;
   }
 
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return 0;
-
-  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
+  buffer_read_page(table_id, leaf_pagenum, &page.page);
 
   // leaf has enough space
-  if (page->leaf_data.free_space >= required_space) {
-    if (!insert_into_leaf(page, key, size, value)) {
-      unpin(page);
+  if (page.leaf_data.free_space >= required_space) {
+    if (!insert_into_leaf(&page, key, size, value)) {
+      unpin(table_id, leaf_pagenum);
       LOG_ERR("failed to insert into leaf");
       return 0;
     }
-    set_dirty(page);
-    unpin(page);
+    buffer_write_page(table_id, leaf_pagenum, &page.page);
+    unpin(table_id, leaf_pagenum);
     return root;
   }
 
   // leaf doesn't have enough space
-  unpin(page);
+  unpin(table_id, leaf_pagenum);
   pagenum_t sibling;
   return insert_into_leaf_after_splitting(table_id, root, leaf_pagenum,
                                           &sibling, key, size, value);
@@ -1327,4 +1330,91 @@ pagenum_t bpt_delete(int64_t table_id, pagenum_t root, bpt_key_t key) {
   if (leaf_pagenum == 0) return 0;
 
   return delete_from_leaf(table_id, root, leaf_pagenum, key);
+}
+
+bool is_clean(int64_t table_id, pagenum_t root, pagenum_t parent, bpt_key_t min,
+              bpt_key_t max, bool is_root, bool is_first_child) {
+  if (root == 0) return true;
+
+  bpt_page_t page;
+  buffer_read_page(table_id, root, &page.page);
+  if (!is_root && page.header.parent_page != parent) {
+    unpin(table_id, root);
+    LOG_ERR("invalid parent at %llu, (correct: %llu, wrong: %llu)", root,
+            parent, page.header.parent_page);
+    return false;
+  }
+
+  if (page.header.is_leaf) {
+    bpt_leaf_page_t leaf;
+    memcpy(&leaf.page, &page.page, sizeof(page.page));
+    if (is_first_child) {
+      // if first child leaf, then check right sibling correctness
+      pagenum_t leaf_parent_pagenum = leaf.leaf_data.header.parent_page;
+      bpt_internal_page_t parent;
+      buffer_read_page(table_id, leaf_parent_pagenum, &parent.page);
+      bpt_leaf_page_t current;
+      auto right_sibling = leaf.leaf_data.right_sibling;
+      auto parent_slots = internal_slot_array(&parent);
+      auto parent_num_of_keys = parent.internal_data.header.num_of_keys;
+      for (int i = 0; i < parent_num_of_keys; ++i) {
+        if (parent_slots[i].pagenum != right_sibling) {
+          unpin(table_id, root);
+          unpin(table_id, leaf_parent_pagenum);
+          LOG_ERR("invalid right sibling");
+          return false;
+        }
+        buffer_read_page(table_id, parent_slots[i].pagenum, &current.page);
+        right_sibling = current.leaf_data.right_sibling;
+        unpin(table_id, parent_slots[i].pagenum);
+      }
+      unpin(table_id, leaf_parent_pagenum);
+    }
+
+    auto num_of_keys = leaf.leaf_data.header.num_of_keys;
+    auto slots = leaf_slot_array(&leaf);
+    for (int i = 0; i < num_of_keys; ++i) {
+      if (i != 0 && slots[i - 1].key > slots[i].key) {
+        unpin(table_id, root);
+        LOG_ERR("invalid leaf keys order");
+        return false;
+      }
+      if (slots[i].key < min || slots[i].key >= max) {
+        unpin(table_id, root);
+        LOG_ERR("invalid leaf key at idx %d, range: [%ld, %ld)", i, min, max);
+        return false;
+      }
+    }
+    unpin(table_id, root);
+    return true;
+  }
+
+  auto num_of_keys = page.header.num_of_keys;
+  unpin(table_id, root);
+  bpt_internal_page_t internal;
+  buffer_read_page(table_id, root, &internal.page);
+  unpin(table_id, root);
+  auto slots = internal_slot_array(&internal);
+
+  if (is_root && num_of_keys == 0) {
+    return is_clean(table_id, internal.internal_data.first_child_page, root,
+                    min, max, false, true);
+  }
+
+  if (!is_clean(table_id, internal.internal_data.first_child_page, root, min,
+                slots[0].key, false))
+    return false;
+  if (!is_clean(table_id, slots[num_of_keys - 1].pagenum, root,
+                slots[num_of_keys - 1].key, max, false))
+    return false;
+  for (int i = 0; i < num_of_keys - 1; ++i) {
+    if (slots[i].key > slots[i + 1].key) {
+      LOG_ERR("invalid internal keys order");
+      return false;
+    }
+    if (!is_clean(table_id, slots[i].pagenum, root, slots[i].key,
+                  slots[i + 1].key, false))
+      return false;
+  }
+  return true;
 }

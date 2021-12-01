@@ -74,3 +74,11 @@ int db_delete(int64_t table_id, int64_t key) {
 
   return 0;
 }
+
+bool is_clean(int64_t table_id) {
+  header_page_t header;
+  buffer_read_header_page(table_id, &header);
+  auto root = header.header.root_page_number;
+  unpin_header(table_id);
+  return is_clean(table_id, root);
+}

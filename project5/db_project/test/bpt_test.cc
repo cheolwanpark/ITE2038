@@ -48,6 +48,7 @@ TEST_F(BptTest, insert_and_find) {
     root = bpt_insert(table_id, root, i, 50, vals[i % kinds]);
     ASSERT_NE(root, 0);
   }
+  ASSERT_TRUE(is_clean(table_id, root));
 
   char read_buf[112];
   uint16_t size;
