@@ -27,6 +27,4 @@ int db_update(int64_t table_id, int64_t key, char *values,
 // return 0 on success (other value on failed)
 int db_delete(int64_t table_id, int64_t key);
 
-bool is_clean(int64_t table_id);
-
 #endif

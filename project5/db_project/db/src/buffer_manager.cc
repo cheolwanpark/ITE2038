@@ -344,30 +344,29 @@ pagenum_t buffer_alloc_page(int64_t table_id) {
     return 0;
   }
 
-  header_page_t header_page;
-  __buffer_read_page(table_id, kHeaderPagenum, &header_page.page);
-  if (header_page.header.first_free_page == 0) {
+  auto *header_page =
+      buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  if (header_page->header.first_free_page == 0) {
     pagenum_t start = 0, end = 0;
     uint64_t num_new_pages = 0;
     if (file_expand_twice(table_id, &start, &end, &num_new_pages) ||
         start == 0) {
-      __unpin(table_id, kHeaderPagenum);
+      unpin(header_page);
       LOG_ERR("failed to expand file");
       return 0;
     }
     // connect expanded list into header page
-    header_page.header.first_free_page = start;
-    header_page.header.num_of_pages += num_new_pages;
+    header_page->header.first_free_page = start;
+    header_page->header.num_of_pages += num_new_pages;
   }
 
-  auto result = header_page.header.first_free_page;
-  page_node_t allocated_page;
-  __buffer_read_page(table_id, result, &allocated_page.page);
-  header_page.header.first_free_page = allocated_page.next_free_page;
-  __unpin(table_id, result);
+  auto result = header_page->header.first_free_page;
+  auto *allocated_page = buffer_get_page_ptr<page_node_t>(table_id, result);
+  header_page->header.first_free_page = allocated_page->next_free_page;
+  unpin(allocated_page);
 
-  __buffer_write_page(table_id, kHeaderPagenum, &header_page.page);
-  __unpin(table_id, kHeaderPagenum);
+  set_dirty(header_page);
+  unpin(header_page);
   return result;
 }
 
@@ -377,18 +376,17 @@ void buffer_free_page(int64_t table_id, pagenum_t pagenum) {
     return;
   }
 
-  header_page_t header_page;
-  page_node_t page_node;
-  __buffer_read_page(table_id, kHeaderPagenum, &header_page.page);
-  __buffer_read_page(table_id, pagenum, &page_node.page);
+  auto *header_page =
+      buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+  auto *page_node = buffer_get_page_ptr<page_node_t>(table_id, pagenum);
 
-  page_node.next_free_page = header_page.header.first_free_page;
-  header_page.header.first_free_page = pagenum;
+  page_node->next_free_page = header_page->header.first_free_page;
+  header_page->header.first_free_page = pagenum;
 
-  __buffer_write_page(table_id, kHeaderPagenum, &header_page.page);
-  __buffer_write_page(table_id, pagenum, &page_node.page);
-  __unpin(table_id, kHeaderPagenum);
-  __unpin(table_id, pagenum);
+  set_dirty(header_page);
+  set_dirty(page_node);
+  unpin(header_page);
+  unpin(page_node);
 
   pthread_mutex_lock(&buffer_manager_latch);
   auto freed_frame = find_frame(table_id, pagenum);
