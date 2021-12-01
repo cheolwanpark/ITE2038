@@ -18,7 +18,7 @@ const long long TABLE_NUMBER = 2;
 const long long RECORD_NUMBER = 5000;
 
 const int TRANSFER_COUNT = 10000;
-const int SCAN_COUNT = 100;
+const int SCAN_COUNT = 150;
 const int TRANSFER_THREAD_NUM = 10;
 const int SCAN_THREAD_NUM = 3;
 
@@ -75,31 +75,40 @@ void __transfer_thread_func(void *arg) {
     if (src_table_id == dest_table_id && src_record_id == dest_record_id)
       continue;
 
+    if (src_table_id < dest_table_id) std::swap(src_table_id, dest_table_id);
+    if (src_record_id < dest_record_id)
+      std::swap(src_record_id, dest_record_id);
+
     money_transferred = rand() % MAX_MONEY_TRANSFERRED;
     money_transferred =
         rand() % 2 == 0 ? -money_transferred : money_transferred;
 
     auto trx = trx_begin();
+    // LOG_INFO("%dth trf beg", i);
     account_t acc1, acc2;
     uint16_t size;
 
     if (db_find(src_table_id, src_record_id, acc1.data, &size, trx)) continue;
     ASSERT_EQ(size, sizeof(acc1));
+    // LOG_INFO("S(%lld) by %d", src_record_id, trx);
 
     acc1.money -= money_transferred;
     if (db_update(src_table_id, src_record_id, acc1.data, sizeof(acc1), &size,
                   trx))
       continue;
     ASSERT_EQ(size, sizeof(acc1));
+    // LOG_INFO("X(%lld) by %d", src_record_id, trx);
 
     if (db_find(dest_table_id, dest_record_id, acc2.data, &size, trx)) continue;
     ASSERT_EQ(size, sizeof(acc2));
+    // LOG_INFO("S(%lld) by %d", dest_record_id, trx);
 
     acc2.money += money_transferred;
     if (db_update(dest_table_id, dest_record_id, acc2.data, sizeof(acc2), &size,
                   trx))
       continue;
     ASSERT_EQ(size, sizeof(acc2));
+    // LOG_INFO("X(%lld) by %d", dest_record_id, trx);
 
     if (rand() % 2)
       ASSERT_EQ(trx_commit(trx), trx);
@@ -110,10 +119,10 @@ void __transfer_thread_func(void *arg) {
       return;
     }
 
-    // if ((i + 1) % 5000 == 0)
-    // LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
+    if ((i + 1) % 5000 == 0)
+      LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
   }
-  // LOG_INFO("Transfer thread is done.");
+  LOG_INFO("Transfer thread is done.");
 }
 
 void *transfer_thread_func(void *arg) {
@@ -128,6 +137,7 @@ void __scan_thread_func(void *arg) {
   for (int scan = 0; scan < SCAN_COUNT; ++scan) {
     long long sum_money = 0;
     auto trx = trx_begin();
+    // LOG_INFO("\t\t\t\t\t%dth scan beg", scan);
     int aborted = false;
     for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
       for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
@@ -137,6 +147,7 @@ void __scan_thread_func(void *arg) {
           aborted = true;
           break;
         }
+        // LOG_INFO("\t\t\t\t\tS(%lld) by %d", rid, trx);
         sum_money += acc.money;
       }
       if (aborted) break;
@@ -150,10 +161,10 @@ void __scan_thread_func(void *arg) {
       ASSERT_EQ(sum_money, SUM_MONEY)
           << "Inconsistent state is detected in " << scan + 1 << "th scan!!";
     }
-    // if ((scan + 1) % 50 == 0)
-    // LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
+    if ((scan + 1) % 50 == 0)
+      LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
   }
-  // LOG_INFO("Scan thread is done.");
+  LOG_INFO("Scan thread is done.");
 }
 
 void *scan_thread_func(void *arg) {
@@ -309,7 +320,7 @@ void __updating_func(void *arg) {
       ASSERT_EQ(trx_commit(trx), trx);
     else
       ASSERT_EQ(trx_abort(trx), trx);
-    // if ((iter + 1) % 100 == 0) LOG_INFO("iteration %d done", (iter + 1));
+    if ((iter + 1) % 100 == 0) LOG_INFO("iteration %d done", (iter + 1));
   }
 }
 
@@ -341,5 +352,5 @@ TEST_F(TrxTest, x_lock_only) {
   for (int i = 0; i < UPDATING_THREAD_NUM; ++i) {
     pthread_join(updating_threads[i], NULL);
   }
-  // LOG_INFO("complete!");
+  LOG_INFO("complete!");
 }

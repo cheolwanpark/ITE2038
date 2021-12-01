@@ -28,12 +28,14 @@ int init_lock_table();
 int free_lock_table();
 
 int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
-                          trx_id_t trx_id);
+                          trx_id_t trx_id, int* slotnum);
 trx_t* try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
-                         trx_id_t trx_id);
+                         trx_id_t trx_id, int slotnum);
 
 lock_t* lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
                      int trx_id, int lock_mode);
+trx_t* lock_acquire_compression(int64_t table_id, pagenum_t page_id,
+                                int64_t key, int trx_id, int lock_mode);
 int lock_release(lock_t* lock_obj);
 trx_t* get_trx(lock_t* lock);
 
