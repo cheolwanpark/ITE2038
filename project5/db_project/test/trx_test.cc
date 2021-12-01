@@ -15,12 +15,12 @@
 #include "log.h"
 
 const long long TABLE_NUMBER = 2;
-const long long RECORD_NUMBER = 5000;
+const long long RECORD_NUMBER = 1000;
 
 const int TRANSFER_COUNT = 10000;
-const int SCAN_COUNT = 150;
-const int TRANSFER_THREAD_NUM = 10;
-const int SCAN_THREAD_NUM = 3;
+const int SCAN_COUNT = 1000;
+const int TRANSFER_THREAD_NUM = 12;
+const int SCAN_THREAD_NUM = 4;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -75,9 +75,9 @@ void __transfer_thread_func(void *arg) {
     if (src_table_id == dest_table_id && src_record_id == dest_record_id)
       continue;
 
-    if (src_table_id < dest_table_id) std::swap(src_table_id, dest_table_id);
-    if (src_record_id < dest_record_id)
-      std::swap(src_record_id, dest_record_id);
+    // if (src_table_id < dest_table_id) std::swap(src_table_id, dest_table_id);
+    // if (src_record_id < dest_record_id)
+    //   std::swap(src_record_id, dest_record_id);
 
     money_transferred = rand() % MAX_MONEY_TRANSFERRED;
     money_transferred =
