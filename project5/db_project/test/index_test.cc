@@ -12,7 +12,7 @@
 #include "log.h"
 
 const int DUMMY_TRX = -1;
-const int NUM_BUF = 3;
+const int NUM_BUF = 50000;
 const int INSERTING_N = 100000;
 
 class IndexTest : public ::testing::Test {

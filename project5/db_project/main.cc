@@ -10,10 +10,10 @@
 #include "trx.h"
 
 const long long TABLE_NUMBER = 2;
-const long long RECORD_NUMBER = 10000;
+const long long RECORD_NUMBER = 100000;
 
 const int TRANSFER_COUNT = 10000;
-const int SCAN_COUNT = 100;
+const int SCAN_COUNT = 10;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -154,7 +154,7 @@ int main(int argc, char** argv) {
       LOG_ERR("inconsistent state is detected!");
       return -1;
     }
-    if ((scan + 1) % 50 == 0) LOG_INFO("%dth scan done", scan + 1);
+    if ((scan + 1) % 5 == 0) LOG_INFO("%dth scan done", scan + 1);
   }
   LOG_INFO("Scan is done.");
 

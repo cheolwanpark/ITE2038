@@ -15,12 +15,12 @@
 #include "log.h"
 
 const long long TABLE_NUMBER = 2;
-const long long RECORD_NUMBER = 10000;
+const long long RECORD_NUMBER = 5000;
 
 const int TRANSFER_COUNT = 10000;
 const int SCAN_COUNT = 100;
-const int TRANSFER_THREAD_NUM = 40;
-const int SCAN_THREAD_NUM = 5;
+const int TRANSFER_THREAD_NUM = 10;
+const int SCAN_THREAD_NUM = 3;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -29,7 +29,7 @@ const long long SUM_MONEY = TABLE_NUMBER * RECORD_NUMBER * INITIAL_MONEY;
 class TrxTest : public ::testing::Test {
  protected:
   void SetUp(const char *filename) {
-    init_db(30000);
+    init_db(10000);
     for (int i = 0; i < TABLE_NUMBER; ++i) {
       sprintf(_filename[i], "%d_%s", i, filename);
       remove(_filename[i]);
@@ -110,10 +110,10 @@ void __transfer_thread_func(void *arg) {
       return;
     }
 
-    if ((i + 1) % 5000 == 0)
-      LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
+    // if ((i + 1) % 5000 == 0)
+    // LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
   }
-  LOG_INFO("Transfer thread is done.");
+  // LOG_INFO("Transfer thread is done.");
 }
 
 void *transfer_thread_func(void *arg) {
@@ -150,10 +150,10 @@ void __scan_thread_func(void *arg) {
       ASSERT_EQ(sum_money, SUM_MONEY)
           << "Inconsistent state is detected in " << scan + 1 << "th scan!!";
     }
-    if ((scan + 1) % 50 == 0)
-      LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
+    // if ((scan + 1) % 50 == 0)
+    // LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
   }
-  LOG_INFO("Scan thread is done.");
+  // LOG_INFO("Scan thread is done.");
 }
 
 void *scan_thread_func(void *arg) {
@@ -309,7 +309,7 @@ void __updating_func(void *arg) {
       ASSERT_EQ(trx_commit(trx), trx);
     else
       ASSERT_EQ(trx_abort(trx), trx);
-    if ((iter + 1) % 100 == 0) LOG_INFO("iteration %d done", (iter + 1));
+    // if ((iter + 1) % 100 == 0) LOG_INFO("iteration %d done", (iter + 1));
   }
 }
 
@@ -341,5 +341,5 @@ TEST_F(TrxTest, x_lock_only) {
   for (int i = 0; i < UPDATING_THREAD_NUM; ++i) {
     pthread_join(updating_threads[i], NULL);
   }
-  LOG_INFO("complete!");
+  // LOG_INFO("complete!");
 }

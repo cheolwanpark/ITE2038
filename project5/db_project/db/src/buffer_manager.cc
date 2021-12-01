@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include <algorithm>
-#include <map>
 #include <unordered_map>
 
 #include "log.h"
@@ -23,7 +22,7 @@ using frame_id_t = std::pair<int64_t, pagenum_t>;
 struct frame_map_hash {
   template <class T1, class T2>
   std::size_t operator()(const std::pair<T1, T2> &p) const {
-    return (p.first & 0x1f) | (p.second << 5);
+    return (p.first << 16) ^ (p.second);
   }
 };
 using frame_map_t = std::unordered_map<frame_id_t, frame_t *, frame_map_hash>;
@@ -215,6 +214,7 @@ frame_t *find_frame(int64_t table_id, pagenum_t pagenum) {
 
   auto frame_id = std::make_pair(table_id, pagenum);
   pthread_mutex_lock(&frame_map_latch);
+
   auto search = frame_map.find(frame_id);
   if (search != frame_map.end()) {
     pthread_mutex_unlock(&frame_map_latch);
@@ -308,6 +308,10 @@ int init_buffer_manager(int num_buf) {
     frames[i].next = i + 1 < num_buf ? &frames[i + 1] : NULL;
     frames[i].prev = i - 1 < 0 ? NULL : &frames[i - 1];
   }
+  pthread_mutex_lock(&frame_map_latch);
+  frame_map.clear();
+  frame_map.reserve(num_buf);
+  pthread_mutex_unlock(&frame_map_latch);
   pthread_mutex_unlock(&buffer_manager_latch);
   return 0;
 }

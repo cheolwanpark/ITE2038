@@ -319,7 +319,7 @@ using lock_table_key = std::pair<int64_t, pagenum_t>;
 struct lock_table_hash {
   template <class T1, class T2>
   std::size_t operator()(const std::pair<T1, T2> &p) const {
-    return (p.first & 0x1f) | (p.second << 5);
+    return (p.first << 16) ^ (p.second);
   }
 };
 std::unordered_map<lock_table_key, lock_list_t, lock_table_hash> lock_table;
@@ -329,9 +329,10 @@ lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id) {
   auto found = lock_table.find(pair_key);
   if (found == lock_table.end()) {
     lock_list_t new_list = {table_id, page_id, NULL, NULL};
-    lock_table.emplace(pair_key, new_list);
-  }
-  return lock_table[pair_key];
+    auto res = lock_table.emplace(pair_key, new_list);
+    return res.first->second;
+  } else
+    return found->second;
 }
 
 lock_t *create_lock(int64_t record_id, int mode) {
@@ -403,6 +404,7 @@ int remove_from_lock_list(lock_t *lock) {
 int init_lock_table() {
   pthread_mutex_lock(&trx_table_latch);
   trx_table.clear();
+  trx_table.reserve(10000);
   pthread_mutex_unlock(&trx_table_latch);
 
   pthread_mutex_lock(&lock_table_latch);
