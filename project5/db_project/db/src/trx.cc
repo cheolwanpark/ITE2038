@@ -593,9 +593,37 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
 
   pthread_mutex_lock(&lock_table_latch);
 
-  auto &lock_list = get_lock_list(table_id, page_id);
+  if (convert_implicit_lock(table_id, page_id, key, trx_id)) {
+    pthread_mutex_unlock(&lock_table_latch);
+    LOG_ERR("failed to convert implicit lock into explicit lock");
+    return NULL;
+  }
+
+  if (lock_mode == X_LOCK) {
+    pthread_mutex_lock(&trx_table_latch);
+    auto *trx = try_implicit_lock(table_id, page_id, key, trx_id);
+    // if implicit lock complete then return dummy lock
+    if (trx != NULL) {
+      // create dummy lock (will not be inserted into lock list)
+      auto *new_lock = create_lock(key, X_LOCK);
+      if (new_lock == NULL) {
+        pthread_mutex_unlock(&trx_table_latch);
+        pthread_mutex_unlock(&lock_table_latch);
+        LOG_ERR("failed to create a new lock");
+        return NULL;
+      }
+      new_lock->owner_trx = trx;
+      new_lock->trx_next_lock = trx->head;
+      trx->head = new_lock;
+      pthread_mutex_unlock(&trx_table_latch);
+      pthread_mutex_unlock(&lock_table_latch);
+      return new_lock;
+    }
+    pthread_mutex_unlock(&trx_table_latch);
+  }
 
   // check if trx already has a lock
+  auto &lock_list = get_lock_list(table_id, page_id);
   auto *iter = lock_list.head;
   while (iter != NULL) {
     if (iter->record_id == key && iter->lock_mode == lock_mode &&
@@ -728,7 +756,6 @@ int is_conflicting(lock_t *a, lock_t *b) {
   }
 
   if (a->sentinel == NULL || a->sentinel != b->sentinel) {
-    LOG_ERR("invalid sentinel");
     return false;
   }
 
@@ -747,7 +774,6 @@ lock_t *find_conflicting_lock(lock_t *lock) {
     return NULL;
   }
   if (lock->sentinel == NULL) {
-    LOG_ERR("invalid lock object: sentinel is NULL");
     return NULL;
   }
 
@@ -776,17 +802,19 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
   auto *trx_lock_iter = target_trx->head;
   while (trx_lock_iter != NULL) {
     auto *sentinel = trx_lock_iter->sentinel;
-    auto *iter = sentinel->head;
-    while (iter != NULL && iter != trx_lock_iter) {
-      if (is_conflicting(iter, trx_lock_iter)) {
-        if (iter->owner_trx->id == checking_trx->id) {
-          return true;
-        } else if (is_deadlock(checking_trx, iter->owner_trx))
-          return true;
-        // we don't have to check locks after first x lock
-        if (iter->lock_mode == X_LOCK) break;
+    if (sentinel) {
+      auto *iter = sentinel->head;
+      while (iter != NULL && iter != trx_lock_iter) {
+        if (is_conflicting(iter, trx_lock_iter)) {
+          if (iter->owner_trx->id == checking_trx->id) {
+            return true;
+          } else if (is_deadlock(checking_trx, iter->owner_trx))
+            return true;
+          // we don't have to check locks after first x lock
+          if (iter->lock_mode == X_LOCK) break;
+        }
+        iter = iter->next;
       }
-      iter = iter->next;
     }
     trx_lock_iter = trx_lock_iter->trx_next_lock;
   }
@@ -799,21 +827,22 @@ int is_deadlock(lock_t *lock) {
     return false;
   }
   if (lock->sentinel == NULL || lock->owner_trx == NULL) {
-    LOG_ERR("invalid lock object: sentinel or owner trx is NULL");
     return false;
   }
   // mutexes are already locked in lock_acquire
 
   auto *sentinel = lock->sentinel;
   auto *checking_trx = lock->owner_trx;
-  auto *iter = sentinel->head;
-  while (iter != NULL && iter != lock) {
-    if (is_conflicting(iter, lock) && !iter->owner_trx->releasing) {
-      if (is_deadlock(checking_trx, iter->owner_trx)) return true;
-      // we don't have to check locks after first x lock
-      if (iter->lock_mode == X_LOCK) break;
+  if (sentinel) {
+    auto *iter = sentinel->head;
+    while (iter != NULL && iter != lock) {
+      if (is_conflicting(iter, lock) && !iter->owner_trx->releasing) {
+        if (is_deadlock(checking_trx, iter->owner_trx)) return true;
+        // we don't have to check locks after first x lock
+        if (iter->lock_mode == X_LOCK) break;
+      }
+      iter = iter->next;
     }
-    iter = iter->next;
   }
   return false;
 }

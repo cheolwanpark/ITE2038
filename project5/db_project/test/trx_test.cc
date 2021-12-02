@@ -29,7 +29,7 @@ const long long SUM_MONEY = TABLE_NUMBER * RECORD_NUMBER * INITIAL_MONEY;
 class TrxTest : public ::testing::Test {
  protected:
   void SetUp(const char *filename) {
-    init_db(10000);
+    init_db(5000);
     for (int i = 0; i < TABLE_NUMBER; ++i) {
       sprintf(_filename[i], "%d_%s", i, filename);
       remove(_filename[i]);
