@@ -33,7 +33,8 @@ void __file_read_page(int64_t table_id, pagenum_t pagenum, page_t* dest) {
   }
 }
 
-void __file_write_page(int64_t table_id, pagenum_t pagenum, const page_t* src) {
+void __file_write_page(int64_t table_id, pagenum_t pagenum, const page_t* src,
+                       int sync = true) {
   if (table_id < 0 || src == NULL) {
     LOG_ERR("invalid parameters", pagenum);
     return;
@@ -46,7 +47,7 @@ void __file_write_page(int64_t table_id, pagenum_t pagenum, const page_t* src) {
     LOG_ERR("cannot write page %llu", pagenum);
     return;
   }
-  if (fsync(table_id) < 0) {
+  if (sync && fsync(table_id) < 0) {
     LOG_ERR("cannot sync write page %llu, errno: %s", pagenum, strerror(errno));
   }
 }
@@ -146,7 +147,7 @@ void expand_and_create_pages(int64_t table_id, uint64_t size, pagenum_t* first,
   for (int64_t i = 0; i < *num_new_pages - 1; ++i) {
     current_page_num = offset2pagenum(start + i * kPageSize);
     page_node.next_free_page = current_page_num + 1;
-    __file_write_page(table_id, current_page_num, &page_node.page);
+    __file_write_page(table_id, current_page_num, &page_node.page, false);
   }
   current_page_num = page_node.next_free_page;
   page_node.next_free_page = 0;
