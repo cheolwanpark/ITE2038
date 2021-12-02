@@ -44,6 +44,7 @@ struct trx_t {
   trx_id_t id;
   clock_t start_time;
   lock_t *head;
+  lock_t *dummy_head;
   update_log_t *log_head;
   int releasing;
 };
@@ -60,6 +61,7 @@ struct lock_t {
   lock_t *next;
   lock_list_t *sentinel;
   pthread_cond_t cond;
+  int64_t table_id;
   int64_t record_id;
   int lock_mode;
   lock_t *trx_next_lock;
@@ -70,7 +72,7 @@ struct lock_t {
 bool is_trx_assigned(trx_id_t id);
 int push_into_trx(trx_id_t trx_id, lock_t *lock);
 lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id);
-lock_t *create_lock(int64_t record_id, int mode);
+lock_t *create_lock(int64_t table_id, int64_t record_id, int mode);
 void destroy_lock(lock_t *lock);
 int __lock_release(lock_t *lock_obj);
 int push_into_lock_list(lock_list_t &lock_list, lock_t *lock);
@@ -132,6 +134,7 @@ int trx_begin() {
   new_trx->id = trx_counter;
   new_trx->start_time = clock();
   new_trx->head = NULL;
+  new_trx->dummy_head = NULL;
   new_trx->log_head = NULL;
   new_trx->releasing = false;
   auto res = trx_table.emplace(new_trx->id, new_trx);
@@ -182,8 +185,16 @@ int trx_commit(trx_id_t trx_id) {
     free(current);
   }
 
+  // destroy all dummy locks
+  auto *iter = trx->dummy_head;
+  while (iter != NULL) {
+    auto *current = iter;
+    iter = iter->trx_next_lock;
+    destroy_lock(current);
+  }
+
   // release all locks
-  auto *iter = trx->head;
+  iter = trx->head;
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
@@ -247,8 +258,16 @@ int trx_abort(trx_id_t trx_id) {
     free(current);
   }
 
+  // destroy all dummy locks
+  auto *iter = trx->dummy_head;
+  while (iter != NULL) {
+    auto *current = iter;
+    iter = iter->trx_next_lock;
+    destroy_lock(current);
+  }
+
   // release all locks
-  auto *iter = trx->head;
+  iter = trx->head;
   while (iter != NULL) {
     auto *current = iter;
     iter = iter->trx_next_lock;
@@ -335,7 +354,7 @@ lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id) {
     return found->second;
 }
 
-lock_t *create_lock(int64_t record_id, int mode) {
+lock_t *create_lock(int64_t table_id, int64_t record_id, int mode) {
   if (mode != S_LOCK && mode != X_LOCK) {
     LOG_ERR("invalid lock mode");
     return NULL;
@@ -348,6 +367,7 @@ lock_t *create_lock(int64_t record_id, int mode) {
   new_lock->prev = new_lock->next = NULL;
   new_lock->sentinel = NULL;
   new_lock->cond = PTHREAD_COND_INITIALIZER;
+  new_lock->table_id = table_id;
   new_lock->record_id = record_id;
   new_lock->lock_mode = mode;
   new_lock->trx_next_lock = NULL;
@@ -404,7 +424,6 @@ int remove_from_lock_list(lock_t *lock) {
 int init_lock_table() {
   pthread_mutex_lock(&trx_table_latch);
   trx_table.clear();
-  trx_table.reserve(10000);
   pthread_mutex_unlock(&trx_table_latch);
 
   pthread_mutex_lock(&lock_table_latch);
@@ -484,30 +503,42 @@ int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
         unpin((page_t *)page);
 
         // create explicit lock
+        // find dummy lock and remove it from dummy lock list
+        auto *trx = trx_table[locking_trx_id];
+        auto *iter = trx->dummy_head;
+        lock_t *prev = NULL;
+        while (iter != NULL) {
+          if (iter->table_id == table_id && iter->record_id == key) {
+            // remove it from dummy lock list
+            if (prev == NULL)
+              trx->dummy_head = iter->trx_next_lock;
+            else
+              prev->trx_next_lock = iter->trx_next_lock;
+            break;
+          }
+          prev = iter;
+          iter = iter->trx_next_lock;
+        }
+        if (iter == NULL) {
+          pthread_mutex_unlock(&trx_table_latch);
+          pthread_mutex_unlock(&lock_table_latch);
+          LOG_ERR("failed to find dummy lock");
+          return 1;
+        }
+
+        // push it into trx lock list
+        iter->trx_next_lock = trx->head;
+        trx->head = iter;
+
+        // push it into lock list
         auto &lock_list = get_lock_list(table_id, page_id);
-        auto *new_lock = create_lock(key, X_LOCK);
-        new_lock->sentinel = &lock_list;
-        if (new_lock == NULL) {
-          unpin((page_t *)page);
-          pthread_mutex_unlock(&trx_table_latch);
-          pthread_mutex_unlock(&lock_table_latch);
-          LOG_ERR("failed to create a new lock");
-          return 1;
-        }
-        if (push_into_trx(locking_trx_id, new_lock)) {
-          unpin((page_t *)page);
-          pthread_mutex_unlock(&trx_table_latch);
-          pthread_mutex_unlock(&lock_table_latch);
-          destroy_lock(new_lock);
-          return 1;
-        }
-        if (push_into_lock_list(lock_list, new_lock)) {
-          unpin((page_t *)page);
+        if (push_into_lock_list(lock_list, iter)) {
           pthread_mutex_unlock(&trx_table_latch);
           pthread_mutex_unlock(&lock_table_latch);
           LOG_ERR("failed to push into the lock list");
           return 1;
         }
+
         // after converting, do nothing. (lock will be acquired outside)
         pthread_mutex_unlock(&trx_table_latch);
         pthread_mutex_unlock(&lock_table_latch);
@@ -529,8 +560,8 @@ int convert_implicit_lock(int table_id, pagenum_t page_id, int64_t key,
   return 0;
 }
 
-trx_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
-                         int trx_id) {
+lock_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
+                          int trx_id) {
   pthread_mutex_lock(&lock_table_latch);
 
   auto &lock_list = get_lock_list(table_id, page_id);
@@ -566,8 +597,6 @@ trx_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
   // if there was an implicit lock it has already been converted into X lock by
   // convert_implicit_lock
   auto *page = buffer_get_page_ptr<bpt_page_t>(table_id, page_id);
-  pthread_mutex_unlock(&trx_table_latch);
-  pthread_mutex_unlock(&lock_table_latch);
   leaf_slot_t *slots = (leaf_slot_t *)(page->page.data + kBptPageHeaderSize);
   auto num_of_keys = page->header.num_of_keys;
 
@@ -576,12 +605,29 @@ trx_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
       slots[i].trx_id = trx_id;
       set_dirty((page_t *)page);
       unpin((page_t *)page);
-      return trx;
+
+      // create dummy lock (will not be inserted into lock list)
+      auto *new_lock = create_lock(table_id, key, X_LOCK);
+      if (new_lock == NULL) {
+        pthread_mutex_unlock(&trx_table_latch);
+        pthread_mutex_unlock(&lock_table_latch);
+        LOG_ERR("failed to create a new lock");
+        return NULL;
+      }
+      // insert dummy lock into dummy lock list
+      new_lock->owner_trx = trx;
+      new_lock->trx_next_lock = trx->dummy_head;
+      trx->dummy_head = new_lock;
+      pthread_mutex_unlock(&trx_table_latch);
+      pthread_mutex_unlock(&lock_table_latch);
+      return new_lock;
     }
   }
 
   // there is no record with given key
   unpin((page_t *)page);
+  pthread_mutex_unlock(&trx_table_latch);
+  pthread_mutex_unlock(&lock_table_latch);
   return NULL;
 }
 
@@ -601,23 +647,11 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
 
   if (lock_mode == X_LOCK) {
     pthread_mutex_lock(&trx_table_latch);
-    auto *trx = try_implicit_lock(table_id, page_id, key, trx_id);
-    // if implicit lock complete then return dummy lock
-    if (trx != NULL) {
-      // create dummy lock (will not be inserted into lock list)
-      auto *new_lock = create_lock(key, X_LOCK);
-      if (new_lock == NULL) {
-        pthread_mutex_unlock(&trx_table_latch);
-        pthread_mutex_unlock(&lock_table_latch);
-        LOG_ERR("failed to create a new lock");
-        return NULL;
-      }
-      new_lock->owner_trx = trx;
-      new_lock->trx_next_lock = trx->head;
-      trx->head = new_lock;
+    auto *lock = try_implicit_lock(table_id, page_id, key, trx_id);
+    if (lock != NULL) {
       pthread_mutex_unlock(&trx_table_latch);
       pthread_mutex_unlock(&lock_table_latch);
-      return new_lock;
+      return lock;
     }
     pthread_mutex_unlock(&trx_table_latch);
   }
@@ -635,7 +669,7 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   }
 
   // create and push new lock
-  auto *new_lock = create_lock(key, lock_mode);
+  auto *new_lock = create_lock(table_id, key, lock_mode);
   new_lock->sentinel = &lock_list;
   if (new_lock == NULL) {
     pthread_mutex_unlock(&lock_table_latch);
