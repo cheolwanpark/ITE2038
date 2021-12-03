@@ -589,7 +589,7 @@ lock_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
   auto *iter = lock_list.head;
   while (iter != NULL) {
     // there is lock, so cannot hold implicit lock
-    if (is_locking(iter, key, slotnum)) {
+    if (iter->record_id == key) {
       // only same transaction's S lock is allowed
       if (iter->owner_trx->id == trx_id && iter->lock_mode == S_LOCK) {
         iter = iter->next;
@@ -664,28 +664,28 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   }
 
   // there is no record with given key
-  // if (slotnum < 0) {
-  //   pthread_mutex_unlock(&lock_table_latch);
-  //   LOG_WARN("there is no record with given key");
-  //   return NULL;
-  // }
+  if (slotnum < 0) {
+    pthread_mutex_unlock(&lock_table_latch);
+    LOG_WARN("there is no record with given key");
+    return NULL;
+  }
 
-  // if (lock_mode == X_LOCK) {
-  //   pthread_mutex_lock(&trx_table_latch);
-  //   auto *lock = try_implicit_lock(table_id, page_id, key, trx_id, slotnum);
-  //   if (lock != NULL) {
-  //     pthread_mutex_unlock(&trx_table_latch);
-  //     pthread_mutex_unlock(&lock_table_latch);
-  //     return lock;
-  //   }
-  //   pthread_mutex_unlock(&trx_table_latch);
-  // }
+  if (lock_mode == X_LOCK) {
+    pthread_mutex_lock(&trx_table_latch);
+    auto *lock = try_implicit_lock(table_id, page_id, key, trx_id, slotnum);
+    if (lock != NULL) {
+      pthread_mutex_unlock(&trx_table_latch);
+      pthread_mutex_unlock(&lock_table_latch);
+      return lock;
+    }
+    pthread_mutex_unlock(&trx_table_latch);
+  }
 
   // check if trx already has a lock
   auto &lock_list = get_lock_list(table_id, page_id);
   auto *iter = lock_list.head;
   while (iter != NULL) {
-    if (is_locking(iter, key, slotnum) && iter->lock_mode == lock_mode &&
+    if (iter->record_id == key && iter->lock_mode == lock_mode &&
         iter->owner_trx && iter->owner_trx->id == trx_id) {
       pthread_mutex_unlock(&lock_table_latch);
       return iter;
@@ -703,39 +703,39 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   }
 
   pthread_mutex_lock(&trx_table_latch);
-  // checking if we can do lock compression
-  if (lock_mode == S_LOCK) {
-    // there is no conflicting lock, so we can do lock compression
-    if (!is_trx_assigned(trx_id)) {
-      pthread_mutex_unlock(&trx_table_latch);
-      pthread_mutex_unlock(&lock_table_latch);
-      return NULL;
-    }
+  // // checking if we can do lock compression
+  // if (lock_mode == S_LOCK) {
+  //   // there is no conflicting lock, so we can do lock compression
+  //   if (!is_trx_assigned(trx_id)) {
+  //     pthread_mutex_unlock(&trx_table_latch);
+  //     pthread_mutex_unlock(&lock_table_latch);
+  //     return NULL;
+  //   }
 
-    auto *trx = trx_table[trx_id];
-    new_lock->owner_trx = trx;
+  //   auto *trx = trx_table[trx_id];
+  //   new_lock->owner_trx = trx;
 
-    if (find_conflicting_lock(new_lock) == NULL) {
-      // find S lock of given trx
-      auto *iter = lock_list.head;
-      while (iter != NULL) {
-        if (iter->lock_mode == S_LOCK && iter->owner_trx &&
-            iter->owner_trx->id == trx_id) {
-          break;
-        }
-        iter = iter->next;
-      }
-      // there is S lock
-      if (iter != NULL) {
-        destroy_lock(new_lock);
-        iter->bitmap |= 1U << slotnum;
-        pthread_mutex_unlock(&trx_table_latch);
-        pthread_mutex_unlock(&lock_table_latch);
-        return iter;
-      }
-      // if there is no S lock, create new one
-    }
-  }
+  //   if (find_conflicting_lock(new_lock) == NULL) {
+  //     // find S lock of given trx
+  //     auto *iter = lock_list.head;
+  //     while (iter != NULL) {
+  //       if (iter->lock_mode == S_LOCK && iter->owner_trx &&
+  //           iter->owner_trx->id == trx_id) {
+  //         break;
+  //       }
+  //       iter = iter->next;
+  //     }
+  //     // there is S lock
+  //     if (iter != NULL) {
+  //       destroy_lock(new_lock);
+  //       iter->bitmap |= 1U << slotnum;
+  //       pthread_mutex_unlock(&trx_table_latch);
+  //       pthread_mutex_unlock(&lock_table_latch);
+  //       return iter;
+  //     }
+  //     // if there is no S lock, create new one
+  //   }
+  // }
 
   if (push_into_trx(trx_id, new_lock)) {
     pthread_mutex_unlock(&trx_table_latch);
