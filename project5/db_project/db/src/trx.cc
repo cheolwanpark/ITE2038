@@ -761,7 +761,12 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   auto start2 = clock();
 #endif
 
-  if (find_conflicting_lock(new_lock) != NULL) {
+  auto *conflict = find_conflicting_lock(new_lock);
+  if (conflict != NULL) {
+    // LOG_INFO("%s(%lld, %x, t%d) is conflicting with %s(%lld, %x, t%d)",
+    //          lock_mode == S_LOCK ? "S" : "X", key, new_lock->bitmap, trx_id,
+    //          conflict->lock_mode == S_LOCK ? "S" : "X", conflict->record_id,
+    //          conflict->bitmap, conflict->owner_trx->id);
     pthread_cond_wait(&new_lock->cond, &lock_table_latch);
   }
 
@@ -852,7 +857,7 @@ int is_conflicting(lock_t *a, lock_t *b) {
   if (a->lock_mode == S_LOCK && b->lock_mode == S_LOCK) return false;
 
   if (a->record_id == b->record_id) return true;
-  if (a->bitmap & b->bitmap) return true;
+  // if (a->bitmap & b->bitmap) return true;
   return false;
 }
 
