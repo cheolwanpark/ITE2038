@@ -66,13 +66,15 @@ struct lock_t {
   int lock_mode;
   lock_t *trx_next_lock;
   trx_t *owner_trx;
+  uint64_t bitmap;
 };
 
 // function definitions
+bool is_locking(lock_t *lock, int64_t key, int slotnum);
 bool is_trx_assigned(trx_id_t id);
 int push_into_trx(trx_id_t trx_id, lock_t *lock);
 lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id);
-lock_t *create_lock(int64_t table_id, int64_t record_id, int mode);
+lock_t *create_lock(int64_t table_id, int64_t record_id, int slotnum, int mode);
 void destroy_lock(lock_t *lock);
 int __lock_release(lock_t *lock_obj);
 int push_into_lock_list(lock_list_t &lock_list, lock_t *lock);
@@ -95,6 +97,13 @@ pthread_mutex_t lock_table_latch = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
 int trx_counter = 1;
 
 std::unordered_map<trx_id_t, trx_t *> trx_table;
+
+bool is_locking(lock_t *lock, int64_t key, int slotnum) {
+  if (lock == NULL) return false;
+  if (lock->record_id == key) return true;
+  if (lock->bitmap & (1U << slotnum)) return true;
+  return false;
+}
 
 bool is_trx_assigned(trx_id_t id) {
   auto found = trx_table.find(id);
@@ -354,7 +363,8 @@ lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id) {
     return found->second;
 }
 
-lock_t *create_lock(int64_t table_id, int64_t record_id, int mode) {
+lock_t *create_lock(int64_t table_id, int64_t record_id, int slotnum,
+                    int mode) {
   if (mode != S_LOCK && mode != X_LOCK) {
     LOG_ERR("invalid lock mode");
     return NULL;
@@ -372,6 +382,10 @@ lock_t *create_lock(int64_t table_id, int64_t record_id, int mode) {
   new_lock->lock_mode = mode;
   new_lock->trx_next_lock = NULL;
   new_lock->owner_trx = NULL;
+  if (slotnum >= 0)
+    new_lock->bitmap = 1U << slotnum;
+  else
+    new_lock->bitmap = 0;
   return new_lock;
 }
 
@@ -575,7 +589,7 @@ lock_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
   auto *iter = lock_list.head;
   while (iter != NULL) {
     // there is lock, so cannot hold implicit lock
-    if (iter->record_id == key) {
+    if (is_locking(iter, key, slotnum)) {
       // only same transaction's S lock is allowed
       if (iter->owner_trx->id == trx_id && iter->lock_mode == S_LOCK) {
         iter = iter->next;
@@ -618,7 +632,7 @@ lock_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
   unpin((page_t *)page);
 
   // create dummy lock (will not be inserted into lock list)
-  auto *new_lock = create_lock(table_id, key, X_LOCK);
+  auto *new_lock = create_lock(table_id, key, slotnum, X_LOCK);
   if (new_lock == NULL) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
@@ -632,36 +646,6 @@ lock_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
   pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_unlock(&lock_table_latch);
   return new_lock;
-
-  // for (int i = 0; i < num_of_keys; ++i) {
-  //   if (slots[i].key == key) {
-  //     slots[i].trx_id = trx_id;
-  //     set_dirty((page_t *)page);
-  //     unpin((page_t *)page);
-
-  //     // create dummy lock (will not be inserted into lock list)
-  //     auto *new_lock = create_lock(table_id, key, X_LOCK);
-  //     if (new_lock == NULL) {
-  //       pthread_mutex_unlock(&trx_table_latch);
-  //       pthread_mutex_unlock(&lock_table_latch);
-  //       LOG_ERR("failed to create a new lock");
-  //       return NULL;
-  //     }
-  //     // insert dummy lock into dummy lock list
-  //     new_lock->owner_trx = trx;
-  //     new_lock->trx_next_lock = trx->dummy_head;
-  //     trx->dummy_head = new_lock;
-  //     pthread_mutex_unlock(&trx_table_latch);
-  //     pthread_mutex_unlock(&lock_table_latch);
-  //     return new_lock;
-  //   }
-  // }
-
-  // // there is no record with given key
-  // unpin((page_t *)page);
-  // pthread_mutex_unlock(&trx_table_latch);
-  // pthread_mutex_unlock(&lock_table_latch);
-  // return NULL;
 }
 
 lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
@@ -701,7 +685,7 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   auto &lock_list = get_lock_list(table_id, page_id);
   auto *iter = lock_list.head;
   while (iter != NULL) {
-    if (iter->record_id == key && iter->lock_mode == lock_mode &&
+    if (is_locking(iter, key, slotnum) && iter->lock_mode == lock_mode &&
         iter->owner_trx && iter->owner_trx->id == trx_id) {
       pthread_mutex_unlock(&lock_table_latch);
       return iter;
@@ -710,14 +694,49 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   }
 
   // create and push new lock
-  auto *new_lock = create_lock(table_id, key, lock_mode);
+  auto *new_lock = create_lock(table_id, key, slotnum, lock_mode);
   new_lock->sentinel = &lock_list;
   if (new_lock == NULL) {
     pthread_mutex_unlock(&lock_table_latch);
     LOG_ERR("failed to create a new lock");
     return NULL;
   }
+
   pthread_mutex_lock(&trx_table_latch);
+  // checking if we can do lock compression
+  if (lock_mode == S_LOCK) {
+    // there is no conflicting lock, so we can do lock compression
+    if (!is_trx_assigned(trx_id)) {
+      pthread_mutex_unlock(&trx_table_latch);
+      pthread_mutex_unlock(&lock_table_latch);
+      return NULL;
+    }
+
+    auto *trx = trx_table[trx_id];
+    new_lock->owner_trx = trx;
+
+    if (find_conflicting_lock(new_lock) == NULL) {
+      // find S lock of given trx
+      auto *iter = lock_list.head;
+      while (iter != NULL) {
+        if (iter->lock_mode == S_LOCK && iter->owner_trx &&
+            iter->owner_trx->id == trx_id) {
+          break;
+        }
+        iter = iter->next;
+      }
+      // there is S lock
+      if (iter != NULL) {
+        destroy_lock(new_lock);
+        iter->bitmap |= 1U << slotnum;
+        pthread_mutex_unlock(&trx_table_latch);
+        pthread_mutex_unlock(&lock_table_latch);
+        return iter;
+      }
+      // if there is no S lock, create new one
+    }
+  }
+
   if (push_into_trx(trx_id, new_lock)) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
@@ -771,21 +790,15 @@ int __lock_release(lock_t *lock_obj) {
 
   auto *iter = lock_obj->next;
   auto rid = lock_obj->record_id;
+  auto bitmap = lock_obj->bitmap;
   if (remove_from_lock_list(lock_obj)) {
     LOG_WARN("failed to remove from the lock list");
     return 1;
   }
   destroy_lock(lock_obj);
   while (iter != NULL) {
-    if (iter->record_id == rid) {
-      if (iter->lock_mode == S_LOCK) {
-        pthread_cond_signal(&iter->cond);
-      } else {
-        if (find_conflicting_lock(iter) == NULL)
-          pthread_cond_signal(&iter->cond);
-        // locks behind the X lock are conflicting with this X lock
-        break;
-      }
+    if (iter->record_id == rid || iter->bitmap & bitmap) {
+      if (find_conflicting_lock(iter) == NULL) pthread_cond_signal(&iter->cond);
     }
     iter = iter->next;
   }
@@ -834,8 +847,10 @@ int is_conflicting(lock_t *a, lock_t *b) {
     return false;
   }
 
-  if (a->record_id != b->record_id) return false;
   if (a->owner_trx->id == b->owner_trx->id) return false;
+
+  if (a->record_id != b->record_id && (a->bitmap & b->bitmap) == 0U)
+    return false;
 
   if (a->lock_mode == X_LOCK || b->lock_mode == X_LOCK)
     return true;
