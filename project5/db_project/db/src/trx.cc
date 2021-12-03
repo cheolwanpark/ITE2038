@@ -797,11 +797,9 @@ int __lock_release(lock_t *lock_obj) {
   }
   destroy_lock(lock_obj);
   while (iter != NULL) {
-    if (find_conflicting_lock(iter) == NULL) pthread_cond_signal(&iter->cond);
-    // if (iter->record_id == rid || iter->bitmap & bitmap) {
-    //   if (find_conflicting_lock(iter) == NULL)
-    //   pthread_cond_signal(&iter->cond);
-    // }
+    if (iter->record_id == rid || iter->bitmap & bitmap) {
+      if (find_conflicting_lock(iter) == NULL) pthread_cond_signal(&iter->cond);
+    }
     iter = iter->next;
   }
   return 0;
@@ -889,7 +887,6 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
   // latches are already locked in is_deadlock
   // if target trx is committed/aborted or not waiting, then not a deadlock
   if (!is_trx_assigned(target_trx->id) || is_running(target_trx)) return false;
-
   auto *trx_lock_iter = target_trx->head;
   while (trx_lock_iter != NULL) {
     auto *sentinel = trx_lock_iter->sentinel;
