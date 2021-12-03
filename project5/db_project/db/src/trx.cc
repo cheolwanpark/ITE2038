@@ -66,13 +66,14 @@ struct lock_t {
   int lock_mode;
   lock_t *trx_next_lock;
   trx_t *owner_trx;
+  uint16_t bitmap;
 };
 
 // function definitions
 bool is_trx_assigned(trx_id_t id);
 int push_into_trx(trx_id_t trx_id, lock_t *lock);
 lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id);
-lock_t *create_lock(int64_t table_id, int64_t record_id, int mode);
+lock_t *create_lock(int64_t table_id, int64_t record_id, int slotnum, int mode);
 void destroy_lock(lock_t *lock);
 int __lock_release(lock_t *lock_obj);
 int push_into_lock_list(lock_list_t &lock_list, lock_t *lock);
@@ -354,7 +355,8 @@ lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id) {
     return found->second;
 }
 
-lock_t *create_lock(int64_t table_id, int64_t record_id, int mode) {
+lock_t *create_lock(int64_t table_id, int64_t record_id, int slotnum,
+                    int mode) {
   if (mode != S_LOCK && mode != X_LOCK) {
     LOG_ERR("invalid lock mode");
     return NULL;
@@ -372,6 +374,7 @@ lock_t *create_lock(int64_t table_id, int64_t record_id, int mode) {
   new_lock->lock_mode = mode;
   new_lock->trx_next_lock = NULL;
   new_lock->owner_trx = NULL;
+  new_lock->bitmap = 1U << slotnum;
   return new_lock;
 }
 
@@ -618,7 +621,7 @@ lock_t *try_implicit_lock(int64_t table_id, pagenum_t page_id, int64_t key,
   unpin((page_t *)page);
 
   // create dummy lock (will not be inserted into lock list)
-  auto *new_lock = create_lock(table_id, key, X_LOCK);
+  auto *new_lock = create_lock(table_id, key, slotnum, X_LOCK);
   if (new_lock == NULL) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
@@ -710,7 +713,7 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   }
 
   // create and push new lock
-  auto *new_lock = create_lock(table_id, key, lock_mode);
+  auto *new_lock = create_lock(table_id, key, slotnum, lock_mode);
   new_lock->sentinel = &lock_list;
   if (new_lock == NULL) {
     pthread_mutex_unlock(&lock_table_latch);
