@@ -664,22 +664,22 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
   }
 
   // there is no record with given key
-  // if (slotnum < 0) {
-  //   pthread_mutex_unlock(&lock_table_latch);
-  //   LOG_WARN("there is no record with given key");
-  //   return NULL;
-  // }
+  if (slotnum < 0) {
+    pthread_mutex_unlock(&lock_table_latch);
+    LOG_WARN("there is no record with given key");
+    return NULL;
+  }
 
-  // if (lock_mode == X_LOCK) {
-  //   pthread_mutex_lock(&trx_table_latch);
-  //   auto *lock = try_implicit_lock(table_id, page_id, key, trx_id, slotnum);
-  //   if (lock != NULL) {
-  //     pthread_mutex_unlock(&trx_table_latch);
-  //     pthread_mutex_unlock(&lock_table_latch);
-  //     return lock;
-  //   }
-  //   pthread_mutex_unlock(&trx_table_latch);
-  // }
+  if (lock_mode == X_LOCK) {
+    pthread_mutex_lock(&trx_table_latch);
+    auto *lock = try_implicit_lock(table_id, page_id, key, trx_id, slotnum);
+    if (lock != NULL) {
+      pthread_mutex_unlock(&trx_table_latch);
+      pthread_mutex_unlock(&lock_table_latch);
+      return lock;
+    }
+    pthread_mutex_unlock(&trx_table_latch);
+  }
 
   // check if trx already has a lock
   auto &lock_list = get_lock_list(table_id, page_id);
@@ -849,11 +849,13 @@ int is_conflicting(lock_t *a, lock_t *b) {
 
   if (a->owner_trx->id == b->owner_trx->id) return false;
 
-  if (a->lock_mode == S_LOCK && b->lock_mode == S_LOCK) return false;
+  if (a->record_id != b->record_id && (a->bitmap & b->bitmap) == 0U)
+    return false;
 
-  if (a->record_id == b->record_id) return true;
-  if (a->bitmap & b->bitmap) return true;
-  return false;
+  if (a->lock_mode == X_LOCK || b->lock_mode == X_LOCK)
+    return true;
+  else
+    return false;
 }
 
 lock_t *find_conflicting_lock(lock_t *lock) {
