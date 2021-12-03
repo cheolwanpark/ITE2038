@@ -19,8 +19,8 @@ const long long RECORD_NUMBER = 10000;
 
 const int TRANSFER_COUNT = 10000;
 const int SCAN_COUNT = 100;
-const int TRANSFER_THREAD_NUM = 12;
-const int SCAN_THREAD_NUM = 4;
+const int TRANSFER_THREAD_NUM = 10;
+const int SCAN_THREAD_NUM = 3;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -110,10 +110,10 @@ void __transfer_thread_func(void *arg) {
       return;
     }
 
-    if ((i + 1) % 5000 == 0)
-      LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
+    // if ((i + 1) % 5000 == 0)
+    // LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
   }
-  LOG_INFO("Transfer thread is done.");
+  // LOG_INFO("Transfer thread is done.");
 }
 
 void *transfer_thread_func(void *arg) {
@@ -150,10 +150,10 @@ void __scan_thread_func(void *arg) {
       ASSERT_EQ(sum_money, SUM_MONEY)
           << "Inconsistent state is detected in " << scan + 1 << "th scan!!";
     }
-    if ((scan + 1) % 50 == 0)
-      LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
+    // if ((scan + 1) % 50 == 0)
+    // LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
   }
-  LOG_INFO("Scan thread is done.");
+  // LOG_INFO("Scan thread is done.");
 }
 
 void *scan_thread_func(void *arg) {
