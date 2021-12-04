@@ -72,7 +72,7 @@ struct lock_t {
 // function definitions
 bool is_locking(lock_t *lock, int64_t key, int slotnum);
 bool is_trx_assigned(trx_id_t id);
-int push_into_trx(trx_id_t trx_id, lock_t *lock);
+int push_into_trx(trx_t *trx, lock_t *lock);
 lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id);
 lock_t *create_lock(int64_t table_id, int64_t record_id, int slotnum, int mode);
 void destroy_lock(lock_t *lock);
@@ -110,14 +110,8 @@ bool is_trx_assigned(trx_id_t id) {
   return found != trx_table.end();
 }
 
-int push_into_trx(trx_id_t trx_id, lock_t *lock) {
-  if (lock == NULL) {
-    LOG_ERR("invalid parameters");
-    return 1;
-  }
+int push_into_trx(trx_t *trx, lock_t *lock) {
   // mutexes are already locked in lock_acquire
-  if (!is_trx_assigned(trx_id)) return 1;
-  auto *trx = trx_table[trx_id];
   lock->owner_trx = trx;
   lock->trx_next_lock = trx->head;
   trx->head = lock;
@@ -699,7 +693,38 @@ lock_t *lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
     return NULL;
   }
   pthread_mutex_lock(&trx_table_latch);
-  if (push_into_trx(trx_id, new_lock)) {
+  if (!is_trx_assigned(trx_id)) {
+    pthread_mutex_unlock(&trx_table_latch);
+    pthread_mutex_unlock(&lock_table_latch);
+    destroy_lock(new_lock);
+    return NULL;
+  }
+  auto *trx = trx_table[trx_id];
+
+  // lock compression
+  if (lock_mode == S_LOCK) {
+    new_lock->owner_trx = trx;
+    // there is no conflicting, can do lock compression
+    if (find_conflicting_lock(new_lock) == NULL) {
+      auto *iter = lock_list.head;
+      while (iter != NULL) {
+        if (iter->lock_mode == S_LOCK && iter->owner_trx &&
+            iter->owner_trx->id == trx_id)
+          break;
+        iter = iter->next;
+      }
+      if (iter != NULL) {
+        destroy_lock(new_lock);
+        iter->bitmap |= 1ULL << slotnum;
+        pthread_mutex_unlock(&trx_table_latch);
+        pthread_mutex_unlock(&lock_table_latch);
+        return iter;
+      }
+      // if there is no S lock on trx, then create new one
+    }
+  }
+
+  if (push_into_trx(trx, new_lock)) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
     destroy_lock(new_lock);
@@ -759,16 +784,8 @@ int __lock_release(lock_t *lock_obj) {
   }
   destroy_lock(lock_obj);
   while (iter != NULL) {
-    if (iter->bitmap & bitmap) {
-      if (iter->lock_mode == S_LOCK) {
-        pthread_cond_signal(&iter->cond);
-      } else {
-        if (find_conflicting_lock(iter) == NULL)
-          pthread_cond_signal(&iter->cond);
-        // locks behind the X lock are conflicting with this X lock
-        break;
-      }
-    }
+    if (iter->bitmap & bitmap && find_conflicting_lock(iter) == NULL)
+      pthread_cond_signal(&iter->cond);
     iter = iter->next;
   }
   return 0;

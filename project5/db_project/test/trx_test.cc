@@ -110,10 +110,10 @@ void __transfer_thread_func(void *arg) {
       return;
     }
 
-    // if ((i + 1) % 5000 == 0)
-    // LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
+    if ((i + 1) % 5000 == 0)
+      LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
   }
-  // LOG_INFO("Transfer thread is done.");
+  LOG_INFO("Transfer thread is done.");
 }
 
 void *transfer_thread_func(void *arg) {
@@ -150,10 +150,10 @@ void __scan_thread_func(void *arg) {
       ASSERT_EQ(sum_money, SUM_MONEY)
           << "Inconsistent state is detected in " << scan + 1 << "th scan!!";
     }
-    // if ((scan + 1) % 50 == 0)
-    // LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
+    if ((scan + 1) % 50 == 0)
+      LOG_INFO("%dth scan done in %d", scan + 1, pthread_self());
   }
-  // LOG_INFO("Scan thread is done.");
+  LOG_INFO("Scan thread is done.");
 }
 
 void *scan_thread_func(void *arg) {
@@ -272,7 +272,7 @@ TEST_F(TrxTest, s_lock_only) {
 }
 
 // X lock only test
-constexpr int UPDATING_THREAD_NUM = 50;
+constexpr int UPDATING_THREAD_NUM = 100;
 constexpr int UPDATING_COUNT = 1000;
 
 constexpr char CHARSET[] =
