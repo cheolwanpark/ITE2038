@@ -1,0 +1,6 @@
+build
+build_dock
+.DS_Store
+*.log
+CMakeCache.txt
+.vscode
