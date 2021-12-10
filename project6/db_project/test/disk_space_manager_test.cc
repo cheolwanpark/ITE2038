@@ -9,7 +9,11 @@ class DiskSpaceManagerTest : public ::testing::Test {
  protected:
   void SetUp(const char *filename) {
     _filename = filename;
-    init_db(100);
+    snprintf(log_path, 100, "%s_log.txt", _filename);
+    snprintf(logmsg_path, 100, "%s_logmsg.txt", _filename);
+    remove(log_path);
+    remove(logmsg_path);
+    init_db(100, 0, 100, log_path, logmsg_path);
     table_id = file_open_table_file(_filename);
     ASSERT_TRUE(table_id > 0);
   }
@@ -20,6 +24,8 @@ class DiskSpaceManagerTest : public ::testing::Test {
   }
 
   const char *_filename;
+  char log_path[101];
+  char logmsg_path[101];
   int64_t table_id;
 };
 

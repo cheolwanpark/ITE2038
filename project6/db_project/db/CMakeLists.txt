@@ -8,6 +8,7 @@ set(DB_SOURCES
   ${DB_SOURCE_DIR}/database.cc
   ${DB_SOURCE_DIR}/buffer_manager.cc
   ${DB_SOURCE_DIR}/trx.cc
+  ${DB_SOURCE_DIR}/recovery.cc
   # Add your sources here
   # ${DB_SOURCE_DIR}/foo/bar/your_source.cc
   )
@@ -22,6 +23,7 @@ set(DB_HEADERS
   ${DB_HEADER_DIR}/database.h
   ${DB_HEADER_DIR}/buffer_manager.h
   ${DB_HEADER_DIR}/trx.h
+  ${DB_HEADER_DIR}/recovery.h
   # Add your headers here
   # ${DB_HEADER_DIR}/foo/bar/your_header.h
   )

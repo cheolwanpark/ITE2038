@@ -2,8 +2,10 @@
 #define DB_TRX_H_
 
 #include <stdint.h>
+#include <time.h>
 
 #include "disk_space_manager/file.h"
+#include "index"
 
 // constants
 constexpr double DEADLOCK_CHECK_RUNTIME_THRESHOLD = 5.0;
@@ -13,8 +15,18 @@ constexpr int X_LOCK = 1;
 
 // types
 using trx_id_t = int;
+
 struct lock_t;
-struct trx_t;
+struct update_log_t;
+struct trx_t {
+  trx_id_t id;
+  clock_t start_time;
+  lock_t* head;
+  lock_t* dummy_head;
+  update_log_t* log_head;
+  int releasing;
+  uint64_t last_lsn;
+};
 
 // APIs for transaction
 int trx_begin();

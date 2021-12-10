@@ -40,15 +40,6 @@ struct update_log_t {
   update_log_t *next;
 };
 
-struct trx_t {
-  trx_id_t id;
-  clock_t start_time;
-  lock_t *head;
-  lock_t *dummy_head;
-  update_log_t *log_head;
-  int releasing;
-};
-
 struct lock_list_t {
   int64_t table_id;
   pagenum_t page_id;
@@ -140,8 +131,10 @@ int trx_begin() {
   new_trx->dummy_head = NULL;
   new_trx->log_head = NULL;
   new_trx->releasing = false;
+  new_trx->last_lsn = 0;
   auto res = trx_table.emplace(new_trx->id, new_trx);
   if (!res.second) {
+    free(new_trx);
     pthread_mutex_unlock(&trx_table_latch);
     LOG_ERR("insertion failed");
     return 0;

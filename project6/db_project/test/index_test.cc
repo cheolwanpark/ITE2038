@@ -19,7 +19,11 @@ class IndexTest : public ::testing::Test {
  protected:
   void SetUp(const char *filename) {
     strcpy(_filename, filename);
-    init_db(NUM_BUF);
+    snprintf(log_path, 100, "%s_log.txt", _filename);
+    snprintf(logmsg_path, 100, "%s_logmsg.txt", _filename);
+    remove(log_path);
+    remove(logmsg_path);
+    init_db(NUM_BUF, 0, 100, log_path, logmsg_path);
     remove(_filename);
     table_id = open_table(_filename);
     ASSERT_TRUE(table_id > 0);
@@ -31,6 +35,8 @@ class IndexTest : public ::testing::Test {
   }
 
   char _filename[256];
+  char log_path[101];
+  char logmsg_path[101];
   int64_t table_id;
 };
 
@@ -107,7 +113,7 @@ TEST_F(IndexTest, insert_and_delete_all) {
   LOG_INFO("insert complete!");
 
   shutdown_db();
-  init_db(NUM_BUF);
+  init_db(NUM_BUF, 0, 100, log_path, logmsg_path);
   table_id = open_table(_filename);
 
   for (auto key : keys) {
@@ -168,7 +174,7 @@ TEST_F(IndexTest, insert_delete_find_update) {
   }
 
   shutdown_db();
-  init_db(NUM_BUF);
+  init_db(NUM_BUF, 0, 100, log_path, logmsg_path);
   table_id = open_table(_filename);
 
   for (int i = 0; i < keys.size() / 2; ++i) {

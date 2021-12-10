@@ -20,6 +20,8 @@ const int MAX_MONEY_TRANSFERRED = 100;
 const long long SUM_MONEY = TABLE_NUMBER * RECORD_NUMBER * INITIAL_MONEY;
 
 const char* FILENAME = "single_thread_test.db";
+char LOG_FILENAME[100] = "log.txt";
+char LOGMSG_FILENAME[100] = "logmsg.txt";
 
 union account_t {
   long long money;
@@ -30,7 +32,7 @@ int main(int argc, char** argv) {
   auto start = clock();
   char filename[TABLE_NUMBER][100];
   int64_t table_id[TABLE_NUMBER];
-  init_db(30000);
+  init_db(5000, 0, 100, LOG_FILENAME, LOGMSG_FILENAME);
   for (int i = 0; i < TABLE_NUMBER; ++i) {
     sprintf(filename[i], "%d_%s", i, FILENAME);
     remove(filename[i]);
