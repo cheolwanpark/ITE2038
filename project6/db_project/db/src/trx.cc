@@ -269,9 +269,17 @@ int trx_abort(trx_id_t trx_id) {
     auto *rec = log_iter->rec;
     // overwrite records with log
     page = buffer_get_page_ptr<page_t>(rec->table_id, rec->page_num);
+    uint32_t next_undo_lsn = 0;
+    if (log_iter->next != NULL) {
+      if (log_iter->next->rec->lsn != rec->prev_lsn) {
+        LOG_ERR("invalid order sequence exists!");
+        return 0;
+      }
+      next_undo_lsn = rec->prev_lsn;
+    }
     auto *new_rec = create_log_compensate(
         trx, (bpt_page_t *)page, rec->table_id, rec->page_num, rec->offset,
-        rec->len, get_new(rec), get_old(rec), rec->prev_lsn);
+        rec->len, get_new(rec), get_old(rec), next_undo_lsn);
     if (new_rec == NULL) {
       LOG_ERR("failed to create new compensate log");
       return 0;
@@ -798,6 +806,7 @@ lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
     unpin(*page_ptr);
     pthread_cond_wait(&new_lock->cond, &lock_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
+    // because there is no insertion and deletion, able to continue immediately
     *page_ptr = buffer_get_page_ptr<bpt_page_t>(table_id, page_id);
   } else {
     pthread_mutex_unlock(&lock_table_latch);

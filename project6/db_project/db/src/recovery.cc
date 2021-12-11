@@ -59,6 +59,18 @@ int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
               strerror(errno));
       return 1;
     }
+
+    // write guard log_size (for reading)
+    uint32_t guard = 0;
+    if (write(log_fd, &guard, sizeof(guard)) != sizeof(guard)) {
+      LOG_ERR("cannot write log, errno: %s", strerror(errno));
+      return 1;
+    }
+    if (fsync(log_fd) < 0) {
+      LOG_ERR("cannot sync log file, errno: %s", strerror(errno));
+      return 1;
+    }
+
   } else {
     log_fd = open(log_path, O_RDWR);
     if (log_fd < 0) {
@@ -202,6 +214,13 @@ int push_into_log_buffer(log_record_t *rec) {
 
 int flush_log() {
   pthread_mutex_lock(&log_latch);
+
+  if (lseek(log_fd, -sizeof(uint32_t), SEEK_END) <
+      0) {  // go to flush start position
+    LOG_ERR("failed to seek on log, errno: %s", strerror(errno));
+    return 1;
+  }
+
   // LOG_INFO("flushing!");
   while (log_head != NULL) {
     auto *current = log_head;
@@ -222,10 +241,6 @@ int flush_log() {
   uint32_t guard = 0;
   if (write(log_fd, &guard, sizeof(guard)) != sizeof(guard)) {
     LOG_ERR("cannot write log, errno: %s", strerror(errno));
-    return 1;
-  }
-  if (lseek(log_fd, -sizeof(guard), SEEK_CUR) < 0) {
-    LOG_ERR("failed to seek on log, errno: %s", strerror(errno));
     return 1;
   }
 
