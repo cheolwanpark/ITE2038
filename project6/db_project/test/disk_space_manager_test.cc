@@ -21,6 +21,8 @@ class DiskSpaceManagerTest : public ::testing::Test {
   void TearDown() override {
     file_close_table_files();
     remove(_filename);
+    remove(log_path);
+    remove(logmsg_path);
   }
 
   const char *_filename;
@@ -30,7 +32,7 @@ class DiskSpaceManagerTest : public ::testing::Test {
 };
 
 TEST_F(DiskSpaceManagerTest, open_db_file) {
-  SetUp("DSM_open_db_file_test.db");
+  SetUp("DATA1");
 
   ASSERT_EQ(file_size(table_id), kDefaultFileSize);
 
@@ -41,7 +43,7 @@ TEST_F(DiskSpaceManagerTest, open_db_file) {
 }
 
 TEST_F(DiskSpaceManagerTest, alloc_dealloc_pages) {
-  SetUp("DSM_alloc_dealloc_pages_test.db");
+  SetUp("DATA1");
   uint32_t allocating_pages = 1234;
 
   std::vector<pagenum_t> allocated_pages;
@@ -64,7 +66,7 @@ TEST_F(DiskSpaceManagerTest, alloc_dealloc_pages) {
 }
 
 TEST_F(DiskSpaceManagerTest, auto_expand) {
-  SetUp("DSM_auto_expand_test.db");
+  SetUp("DATA1");
 
   auto original_size = file_size(table_id);
 
@@ -82,7 +84,7 @@ TEST_F(DiskSpaceManagerTest, auto_expand) {
 }
 
 TEST_F(DiskSpaceManagerTest, read_write_page) {
-  SetUp("DSM_read_write_page_test.db");
+  SetUp("DATA1");
 
   auto allocated_page = file_alloc_page(table_id);
   page_t page;
@@ -98,7 +100,7 @@ TEST_F(DiskSpaceManagerTest, read_write_page) {
 }
 
 TEST_F(DiskSpaceManagerTest, read_write_header) {
-  SetUp("DSM_read_write_header_test.db");
+  SetUp("DATA1");
 
   auto t1 = file_alloc_page(table_id);
   page_t page;

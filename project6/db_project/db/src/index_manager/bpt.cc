@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "log.h"
+#include "recovery.h"
 #include "trx.h"
 
 union bpt_leaf_page_t {
@@ -183,6 +184,7 @@ void init_leaf_page_struct(bpt_leaf_page_t *page, pagenum_t parent_page) {
   page->leaf_data.header.is_leaf = 1;
   page->leaf_data.header.num_of_keys = 0;
   page->leaf_data.header.parent_page = parent_page;
+  page->leaf_data.header.page_lsn = 0;
   page->leaf_data.free_space = kPageSize - kBptPageHeaderSize;
   page->leaf_data.right_sibling = 0;
 }
@@ -197,6 +199,7 @@ void init_internal_page_struct(bpt_internal_page_t *page,
   page->internal_data.header.is_leaf = 0;
   page->internal_data.header.num_of_keys = 0;
   page->internal_data.header.parent_page = parent_page;
+  page->internal_data.header.page_lsn = 0;
   page->internal_data.first_child_page = 0;
 }
 
@@ -1196,13 +1199,15 @@ bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return false;
 
+  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
   if (trx_id > 0) {  // acquire record lock before getting page latch
-    auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, S_LOCK);
+    auto *lock = lock_acquire((bpt_page_t **)&page, table_id, leaf_pagenum, key,
+                              trx_id, S_LOCK);
     if (lock == NULL) {
+      unpin(page);
       return false;
     }
   }
-  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
   auto slots = leaf_slot_array(page);
   auto num_of_keys = page->leaf_data.header.num_of_keys;
   for (int i = 0; i < num_of_keys; ++i) {
@@ -1223,33 +1228,50 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return false;
 
+  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
   trx_t *trx = NULL;
   if (trx_id > 0) {  // acquire record lock before getting page latch
-    auto *lock = lock_acquire(table_id, leaf_pagenum, key, trx_id, X_LOCK);
+    auto *lock = lock_acquire((bpt_page_t **)&page, table_id, leaf_pagenum, key,
+                              trx_id, X_LOCK);
     if (lock == NULL) {
+      unpin(page);
       return false;
     }
     trx = get_trx(lock);
   }
 
-  auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
   auto slots = leaf_slot_array(page);
   auto num_of_keys = page->leaf_data.header.num_of_keys;
   for (int i = 0; i < num_of_keys; ++i) {
     if (slots[i].key == key) {
-      if (trx != NULL &&
-          trx_log_update(trx, table_id, leaf_pagenum, slots[i].offset,
-                         new_val_size, page->page.data + slots[i].offset)) {
-        LOG_ERR("failed to make update log on trx");
-        return false;
+      log_record_t *rec = NULL;
+      if (trx != NULL && value != NULL) {
+        rec = create_log_update(trx, (bpt_page_t *)page, table_id, leaf_pagenum,
+                                slots[i].offset, new_val_size,
+                                page->page.data + slots[i].offset, value);
+        if (rec == NULL) {
+          LOG_ERR("failed to make update log");
+          return false;
+        }
       }
       if (old_val_size != NULL) *old_val_size = slots[i].size;
       if (value != NULL) {
         auto copy_size =
             new_val_size < slots[i].size ? new_val_size : slots[i].size;
         memcpy(page->page.data + slots[i].offset, value, copy_size);
+        set_dirty((page_t *)page);
+        if (trx != NULL) {
+          if (push_into_log_buffer(rec)) {
+            LOG_ERR("failed to push log into log buffer");
+            return false;
+          }
+          if (trx_log_update(trx, rec)) {
+            LOG_ERR("failed to add log into the trx");
+            return false;
+          }
+        }
       }
-      set_dirty((page_t *)page);
+
       unpin((page_t *)page);
       return true;
     }

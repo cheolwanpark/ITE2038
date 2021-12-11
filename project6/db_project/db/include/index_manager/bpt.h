@@ -13,6 +13,8 @@ struct bpt_header_t {  // used in lock manager
   pagenum_t parent_page;
   uint32_t is_leaf;
   uint32_t num_of_keys;
+  uint64_t __reserved;
+  uint64_t page_lsn;
 };
 
 union bpt_page_t {

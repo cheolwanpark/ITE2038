@@ -8,10 +8,12 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <unordered_map>
 
 #include "log.h"
 
 std::map<std::string, int> table_map;
+std::unordered_map<int64_t, int> table_id_map;
 
 uint64_t pagenum2offset(pagenum_t pagenum) { return pagenum * kPageSize; }
 pagenum_t offset2pagenum(uint64_t offset) { return offset / kPageSize; }
@@ -23,6 +25,7 @@ void __file_read_page(int64_t table_id, pagenum_t pagenum, page_t* dest) {
     LOG_ERR("invalid parameters", pagenum);
     return;
   }
+  table_id = table_id_map[table_id];
   if (lseek(table_id, pagenum2offset(pagenum), SEEK_SET) < 0) {
     LOG_ERR("cannot seek page %llu", pagenum);
     return;
@@ -39,6 +42,7 @@ void __file_write_page(int64_t table_id, pagenum_t pagenum, const page_t* src,
     LOG_ERR("invalid parameters", pagenum);
     return;
   }
+  table_id = table_id_map[table_id];
   if (lseek(table_id, pagenum2offset(pagenum), SEEK_SET) < 0) {
     LOG_ERR("cannot seek page %llu", pagenum);
     return;
@@ -57,6 +61,7 @@ void __file_read_header_page(int64_t table_id, header_page_t* dest) {
     LOG_ERR("invalid parameters");
     return;
   }
+  table_id = table_id_map[table_id];
   if (lseek(table_id, pagenum2offset(kHeaderPagenum), SEEK_SET) < 0) {
     LOG_ERR("cannot seek header page");
     return;
@@ -72,6 +77,7 @@ void __file_write_header_page(int64_t table_id, const header_page_t* src) {
     LOG_ERR("invalid parameters");
     return;
   }
+  table_id = table_id_map[table_id];
   if (lseek(table_id, pagenum2offset(kHeaderPagenum), SEEK_SET) < 0) {
     LOG_ERR("cannot seek header page");
     return;
@@ -91,6 +97,7 @@ uint64_t __file_size(int64_t table_id) {
     LOG_ERR("invalid parameters");
     return 0;
   }
+  table_id = table_id_map[table_id];
   auto size = lseek(table_id, 0, SEEK_END);
   if (size < 0) {
     LOG_ERR("cannot seek file end position");
@@ -103,6 +110,7 @@ uint64_t __file_size(int64_t table_id) {
 // Expand file by size
 void expand(int64_t table_id, uint64_t size) {
   if (size < 1LLU) return;
+  table_id = table_id_map[table_id];
   if (lseek(table_id, size - 1, SEEK_END) < 0) {
     LOG_ERR("cannot seek file");
     return;
@@ -200,7 +208,13 @@ int64_t file_open_table_file(const char* pathname) {
     return table_id_found->second;
   }
 
-  int table_id;
+  int table_id = 0;
+  int64_t target_table_id = 0;
+  if (sscanf(pathname, "DATA%lld", &target_table_id) != 1) {
+    LOG_ERR("invalid pathname");
+    return -1;
+  }
+  printf("open %s, id is %lld\n", pathname, target_table_id);
   if (access(pathname, F_OK) != 0) {
     table_id = open(pathname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (table_id < 0) {
@@ -208,6 +222,8 @@ int64_t file_open_table_file(const char* pathname) {
               strerror(errno));
       return table_id;
     }
+    table_id_map[target_table_id] = table_id;
+    table_id = target_table_id;
     expand(table_id, kPageSize);  // expand file for header page
 
     // setup header page
@@ -225,6 +241,8 @@ int64_t file_open_table_file(const char* pathname) {
       LOG_ERR("failed to open %s, errno: %s", pathname, strerror(errno));
       return table_id;
     }
+    table_id_map[target_table_id] = table_id;
+    table_id = target_table_id;
   }
 
   // store in descriptors map

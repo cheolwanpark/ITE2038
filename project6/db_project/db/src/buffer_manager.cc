@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "log.h"
+#include "recovery.h"
 
 struct frame_t {
   page_t frame;
@@ -156,6 +157,12 @@ frame_t *buffer_evict_frame() {
 
   // flush if dirty flag set
   if (iter->is_dirty) {
+    // flush all logs
+    if (flush_log()) {
+      LOG_ERR("failed to flush logs");
+      return NULL;
+    }
+
     file_write_page(iter->table_id, iter->page_num, &iter->frame);
   }
 

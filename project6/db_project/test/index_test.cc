@@ -32,6 +32,8 @@ class IndexTest : public ::testing::Test {
   void TearDown() override {
     shutdown_db();
     remove(_filename);
+    remove(log_path);
+    remove(logmsg_path);
   }
 
   char _filename[256];
@@ -41,7 +43,7 @@ class IndexTest : public ::testing::Test {
 };
 
 TEST_F(IndexTest, insert_and_find) {
-  SetUp("IT_insert_and_find_test.db");
+  SetUp("DATA1");
 
   const int kinds = 4;
   char vals[kinds][112] = {
@@ -83,7 +85,7 @@ TEST_F(IndexTest, insert_and_find) {
 }
 
 TEST_F(IndexTest, insert_and_delete_all) {
-  SetUp("IT_insert_and_delete_all_test.db");
+  SetUp("DATA1");
 
   const int kinds = 4;
   char vals[kinds][112] = {
@@ -122,7 +124,7 @@ TEST_F(IndexTest, insert_and_delete_all) {
 }
 
 TEST_F(IndexTest, insert_delete_find_update) {
-  SetUp("IT_insert_delete_find_test.db");
+  SetUp("DATA1");
 
   const int kinds = 4;
   char vals[kinds][112] = {

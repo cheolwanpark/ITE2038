@@ -5,7 +5,7 @@
 #include <time.h>
 
 #include "disk_space_manager/file.h"
-#include "index"
+#include "index_manager/bpt.h"
 
 // constants
 constexpr double DEADLOCK_CHECK_RUNTIME_THRESHOLD = 5.0;
@@ -18,6 +18,7 @@ using trx_id_t = int;
 
 struct lock_t;
 struct update_log_t;
+struct log_record_t;
 struct trx_t {
   trx_id_t id;
   clock_t start_time;
@@ -32,15 +33,14 @@ struct trx_t {
 int trx_begin();
 int trx_commit(trx_id_t trx_id);
 int trx_abort(trx_id_t trx_id);
-int trx_log_update(trx_t* trx, int64_t table_id, pagenum_t page_id,
-                   uint16_t offset, uint16_t len, const byte* bef);
+int trx_log_update(trx_t* trx, log_record_t* rec);
 
 // APIs for locking
 int init_lock_table();
 int free_lock_table();
 
-lock_t* lock_acquire(int64_t table_id, pagenum_t page_id, int64_t key,
-                     int trx_id, int lock_mode);
+lock_t* lock_acquire(bpt_page_t** page_ptr, int64_t table_id, pagenum_t page_id,
+                     int64_t key, int trx_id, int lock_mode);
 int lock_release(lock_t* lock_obj);
 trx_t* get_trx(lock_t* lock);
 

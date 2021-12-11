@@ -29,6 +29,8 @@ class BptTest : public ::testing::Test {
   void TearDown() override {
     shutdown_db();
     remove(_filename);
+    remove(log_path);
+    remove(logmsg_path);
   }
 
   const char *_filename;
@@ -39,7 +41,7 @@ class BptTest : public ::testing::Test {
 };
 
 TEST_F(BptTest, insert_and_find) {
-  SetUp("BT_insert_and_find_test.db");
+  SetUp("DATA1");
 
   const int kinds = 4;
   char vals[kinds][50] = {
@@ -67,7 +69,7 @@ TEST_F(BptTest, insert_and_find) {
 }
 
 TEST_F(BptTest, insert_delete_find) {
-  SetUp("BT_insert_delete_find_test.db");
+  SetUp("DATA1");
 
   const int kinds = 4;
   char vals[kinds][50] = {

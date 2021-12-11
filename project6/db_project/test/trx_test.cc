@@ -28,14 +28,14 @@ const long long SUM_MONEY = TABLE_NUMBER * RECORD_NUMBER * INITIAL_MONEY;
 
 class TrxTest : public ::testing::Test {
  protected:
-  void SetUp(const char *filename) {
-    snprintf(log_path, 100, "%s_log.txt", filename);
-    snprintf(logmsg_path, 100, "%s_logmsg.txt", filename);
+  void SetUp() override {
+    snprintf(log_path, 100, "log.txt");
+    snprintf(logmsg_path, 100, "logmsg.txt");
     remove(log_path);
     remove(logmsg_path);
     init_db(5000, 0, 100, log_path, logmsg_path);
     for (int i = 0; i < TABLE_NUMBER; ++i) {
-      sprintf(_filename[i], "%d_%s", i, filename);
+      sprintf(_filename[i], "DATA%d", i + 1);
       remove(_filename[i]);
       table_id[i] = file_open_table_file(_filename[i]);
       ASSERT_TRUE(table_id[i] > 0);
@@ -48,6 +48,8 @@ class TrxTest : public ::testing::Test {
     for (int i = 0; i < TABLE_NUMBER; ++i) {
       remove(_filename[i]);
     }
+    remove(log_path);
+    remove(logmsg_path);
   }
 
   char _filename[TABLE_NUMBER][100];
@@ -112,6 +114,7 @@ void __transfer_thread_func(void *arg) {
     else {
       ASSERT_EQ(trx_abort(trx), trx);
     }
+
     if (failed) {
       return;
     }
@@ -144,11 +147,12 @@ void __scan_thread_func(void *arg) {
           break;
         }
         sum_money += acc.money;
+
+        if (failed) {
+          return;
+        }
       }
       if (aborted) break;
-    }
-    if (failed) {
-      return;
     }
     if (!aborted) {
       ASSERT_EQ(trx_commit(trx), trx);
@@ -168,7 +172,7 @@ void *scan_thread_func(void *arg) {
 }
 
 TEST_F(TrxTest, mixed) {
-  SetUp("TT_mixed_test.db");
+  SetUp();
   pthread_t transfer_threads[TRANSFER_THREAD_NUM];
   pthread_t scan_threads[SCAN_THREAD_NUM];
 
@@ -251,7 +255,7 @@ void *scanning_func(void *arg) {
 }
 
 TEST_F(TrxTest, s_lock_only) {
-  SetUp("TT_s_lock_only_test.db");
+  SetUp();
   pthread_t scanning_threads[SCANNING_THREAD_NUM];
 
   srand(time(NULL));
@@ -325,7 +329,7 @@ void *updating_func(void *arg) {
 }
 
 TEST_F(TrxTest, x_lock_only) {
-  SetUp("TT_x_lock_only_test.db");
+  SetUp();
   pthread_t updating_threads[UPDATING_THREAD_NUM];
 
   srand(time(NULL));
