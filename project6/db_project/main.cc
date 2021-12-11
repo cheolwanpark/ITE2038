@@ -14,10 +14,10 @@ const int TRANSFER_THREAD_NUM = 3;
 const int SCAN_THREAD_NUM = 1;
 
 const long long TABLE_NUMBER = 2;
-const long long RECORD_NUMBER = 100000;
+const long long RECORD_NUMBER = 50;
 
-const int TRANSFER_COUNT = 100;
-const int SCAN_COUNT = 0;
+const int TRANSFER_COUNT = 10000;
+const int SCAN_COUNT = 1000;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -35,9 +35,9 @@ int print_log(int n);
 int single_thread();
 int multi_thread();
 
-int main(int argc, char **argv) { return single_thread(); }
+// int main(int argc, char **argv) { return single_thread(); }
 // int main(int argc, char **argv) { return print_log(1000); }
-// int main(int argc, char **argv) { return multi_thread(); }
+int main(int argc, char **argv) { return multi_thread(); }
 
 int print_log(int n) {
   init_db(100, 0, 100, LOG_FILENAME, LOGMSG_FILENAME);
@@ -173,7 +173,7 @@ int single_thread() {
       LOG_ERR("inconsistent state is detected!");
       return -1;
     }
-    if ((scan + 1) % 5 == 0) LOG_INFO("%dth scan done", scan + 1);
+    if ((scan + 1) % 100 == 0) LOG_INFO("%dth scan done", scan + 1);
   }
   LOG_INFO("Scan is done.");
 
@@ -292,7 +292,7 @@ void *scan_thread_func(void *arg) {
         return NULL;
       }
     }
-    if ((scan + 1) % 5 == 0) LOG_INFO("%dth scan done", scan + 1);
+    if ((scan + 1) % 100 == 0) LOG_INFO("%dth scan done", scan + 1);
   }
   LOG_INFO("Scan is done.");
   return NULL;

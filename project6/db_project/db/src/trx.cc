@@ -257,9 +257,6 @@ int trx_abort(trx_id_t trx_id) {
   }
   auto *trx = trx_table[trx_id];
   trx->releasing = true;
-
-  // erase from trx table
-  trx_table.erase(trx_id);
   pthread_mutex_unlock(&trx_table_latch);
 
   // revert all updates
@@ -330,6 +327,7 @@ int trx_abort(trx_id_t trx_id) {
 
   // destroy all dummy locks
   pthread_mutex_lock(&lock_table_latch);
+  pthread_mutex_lock(&trx_table_latch);
   auto *iter = trx->dummy_head;
   while (iter != NULL) {
     auto *current = iter;
@@ -343,11 +341,19 @@ int trx_abort(trx_id_t trx_id) {
     auto *current = iter;
     iter = iter->trx_next_lock;
     if (__lock_release(current)) {
+      pthread_mutex_unlock(&trx_table_latch);
       pthread_mutex_unlock(&lock_table_latch);
       LOG_ERR("failed to release lock");
       return 0;
     }
   }
+
+  // erase from trx table
+  trx_table.erase(trx_id);
+  // free trx
+  free(trx);
+
+  pthread_mutex_unlock(&trx_table_latch);
   pthread_mutex_unlock(&lock_table_latch);
 
 #ifdef TIME_CHECKING
@@ -355,9 +361,6 @@ int trx_abort(trx_id_t trx_id) {
   trx_abort_runtime.push_back(clock() - start);
   pthread_mutex_unlock(&runtime_map_latch);
 #endif
-
-  // free trx
-  free(trx);
 
   return trx_id;
 }
@@ -784,6 +787,7 @@ lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
   }
   if (is_deadlock(new_lock)) {
     unpin(*page_ptr);
+    trx->releasing = true;
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
     if (trx_abort(trx_id) != trx_id) LOG_WARN("failed to abort trx");
@@ -930,7 +934,9 @@ int is_running(trx_t *trx) {
 int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
   // latches are already locked in is_deadlock
   // if target trx is committed/aborted or not waiting, then not a deadlock
-  if (!is_trx_assigned(target_trx->id) || is_running(target_trx)) return false;
+  if (!is_trx_assigned(target_trx->id) || is_running(target_trx) ||
+      target_trx->releasing)
+    return false;
   auto *trx_lock_iter = target_trx->head;
   while (trx_lock_iter != NULL) {
     auto *sentinel = trx_lock_iter->sentinel;
