@@ -690,7 +690,7 @@ lock_t *try_implicit_lock(bpt_page_t *page, int64_t table_id, pagenum_t page_id,
 }
 
 lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
-                     int64_t key, int trx_id, int lock_mode, int *waited) {
+                     int64_t key, int trx_id, int lock_mode) {
 #ifdef TIME_CHECKING
   auto start = clock();
 #endif
@@ -807,8 +807,7 @@ lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
     pthread_cond_wait(&new_lock->cond, &lock_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
     // because there is no insertion and deletion, able to continue immediately
-    // *page_ptr = buffer_get_page_ptr<bpt_page_t>(table_id, page_id);
-    *waited = true;
+    *page_ptr = buffer_get_page_ptr<bpt_page_t>(table_id, page_id);
   } else {
     pthread_mutex_unlock(&lock_table_latch);
   }

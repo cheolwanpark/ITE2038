@@ -35,8 +35,8 @@ int print_log(int n);
 int single_thread();
 int multi_thread();
 
-// int main(int argc, char **argv) { return single_thread(); }
-int main(int argc, char **argv) { return print_log(2000); }
+int main(int argc, char **argv) { return single_thread(); }
+// int main(int argc, char **argv) { return print_log(1000); }
 // int main(int argc, char **argv) { return multi_thread(); }
 
 int print_log(int n) {

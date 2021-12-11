@@ -40,7 +40,7 @@ int init_lock_table();
 int free_lock_table();
 
 lock_t* lock_acquire(bpt_page_t** page_ptr, int64_t table_id, pagenum_t page_id,
-                     int64_t key, int trx_id, int lock_mode, int* waited);
+                     int64_t key, int trx_id, int lock_mode);
 int lock_release(lock_t* lock_obj);
 trx_t* get_trx(lock_t* lock);
 
