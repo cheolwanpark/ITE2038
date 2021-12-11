@@ -1195,17 +1195,26 @@ pagenum_t redistribute_internal(int64_t table_id, pagenum_t root,
 
 // API functions
 bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
-              byte *value, int trx_id) {
+              byte *value, int trx_id, lock_t *lock) {
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return false;
 
   auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
-  if (trx_id > 0) {  // acquire record lock before getting page latch
-    auto *lock = lock_acquire((bpt_page_t **)&page, table_id, leaf_pagenum, key,
-                              trx_id, S_LOCK);
-    if (lock == NULL) {
+  if (lock == NULL &&
+      trx_id > 0) {  // acquire record lock before getting page latch
+    int waited = false;
+    auto *new_lock = lock_acquire((bpt_page_t **)&page, table_id, leaf_pagenum,
+                                  key, trx_id, S_LOCK, &waited);
+    if (new_lock == NULL) {
       unpin(page);
       return false;
+    } else if (waited) {
+      // do it again after getting lock
+      auto *header =
+          buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+      root = header->header.root_page_number;
+      unpin(table_id, kHeaderPagenum);
+      return bpt_find(table_id, root, key, size, value, trx_id, new_lock);
     }
   }
   auto slots = leaf_slot_array(page);
@@ -1224,20 +1233,32 @@ bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
 }
 
 bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
-                uint16_t new_val_size, uint16_t *old_val_size, int trx_id) {
+                uint16_t new_val_size, uint16_t *old_val_size, int trx_id,
+                lock_t *lock) {
   auto leaf_pagenum = find_leaf(table_id, root, key);
   if (leaf_pagenum == 0) return false;
 
   auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
   trx_t *trx = NULL;
-  if (trx_id > 0) {  // acquire record lock before getting page latch
-    auto *lock = lock_acquire((bpt_page_t **)&page, table_id, leaf_pagenum, key,
-                              trx_id, X_LOCK);
-    if (lock == NULL) {
+  if (lock != NULL) {
+    trx = get_trx(lock);
+  } else if (trx_id > 0) {  // acquire record lock before getting page latch
+    int waited = false;
+    auto *new_lock = lock_acquire((bpt_page_t **)&page, table_id, leaf_pagenum,
+                                  key, trx_id, X_LOCK, &waited);
+    if (new_lock == NULL) {
       unpin(page);
       return false;
+    } else if (waited) {
+      // do it again after getting lock
+      auto *header =
+          buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
+      root = header->header.root_page_number;
+      unpin(table_id, kHeaderPagenum);
+      return bpt_update(table_id, root, key, value, new_val_size, old_val_size,
+                        trx_id, new_lock);
     }
-    trx = get_trx(lock);
+    trx = get_trx(new_lock);
   }
 
   auto slots = leaf_slot_array(page);

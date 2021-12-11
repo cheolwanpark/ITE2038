@@ -18,7 +18,7 @@ const long long TABLE_NUMBER = 2;
 const long long RECORD_NUMBER = 10000;
 
 const int TRANSFER_COUNT = 10000;
-const int SCAN_COUNT = 100;
+const int SCAN_COUNT = 250;
 const int TRANSFER_THREAD_NUM = 10;
 const int SCAN_THREAD_NUM = 3;
 
