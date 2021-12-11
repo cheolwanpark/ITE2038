@@ -214,7 +214,6 @@ int64_t file_open_table_file(const char* pathname) {
     LOG_ERR("invalid pathname");
     return -1;
   }
-  printf("open %s, id is %lld\n", pathname, target_table_id);
   if (access(pathname, F_OK) != 0) {
     table_id = open(pathname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (table_id < 0) {
@@ -332,7 +331,7 @@ uint64_t file_size(int64_t table_id) { return __file_size(table_id); }
 // Stop referencing the database file
 void file_close_table_files() {
   for (auto table_id_pair : table_map) {
-    auto table_id = table_id_pair.second;
+    auto table_id = table_id_map[table_id_pair.second];
     if (table_id > 0) {
       if (close(table_id) < 0) {
         LOG_WARN("failed to close %s, errno: %s", table_id_pair.first.c_str(),
@@ -341,5 +340,6 @@ void file_close_table_files() {
     }
   }
   table_map.clear();
+  table_id_map.clear();
   sync();
 }

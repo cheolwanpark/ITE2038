@@ -282,7 +282,7 @@ TEST_F(TrxTest, s_lock_only) {
 }
 
 // X lock only test
-constexpr int UPDATING_THREAD_NUM = 100;
+constexpr int UPDATING_THREAD_NUM = 50;
 constexpr int UPDATING_COUNT = 1000;
 
 constexpr char CHARSET[] =
@@ -319,7 +319,7 @@ void __updating_func(void *arg) {
       ASSERT_EQ(trx_commit(trx), trx);
     else
       ASSERT_EQ(trx_abort(trx), trx);
-    // if ((iter + 1) % 100 == 0) LOG_INFO("iteration %d done", (iter + 1));
+    if ((iter + 1) % 100 == 0) LOG_INFO("iteration %d done", (iter + 1));
   }
 }
 

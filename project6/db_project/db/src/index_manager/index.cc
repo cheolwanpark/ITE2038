@@ -34,7 +34,7 @@ int db_find(int64_t table_id, int64_t key, char *ret_val, uint16_t *val_size,
   }
   auto *header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
   auto root = header->header.root_page_number;
-  unpin((page_t *)header);
+  unpin(header);
   if (bpt_find(table_id, root, key, val_size, ret_val, trx_id))
     return 0;
   else
@@ -49,7 +49,7 @@ int db_update(int64_t table_id, int64_t key, char *values,
   }
   auto *header = buffer_get_page_ptr<header_page_t>(table_id, kHeaderPagenum);
   auto root = header->header.root_page_number;
-  unpin((page_t *)header);
+  unpin(header);
   if (bpt_update(table_id, root, key, values, new_val_size, old_val_size,
                  trx_id))
     return 0;
