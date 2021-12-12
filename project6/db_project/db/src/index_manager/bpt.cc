@@ -373,7 +373,9 @@ pagenum_t insert_into_parent(int64_t table_id, pagenum_t root, pagenum_t parent,
 }
 
 pagenum_t find_leaf(int64_t table_id, pagenum_t root, bpt_key_t key) {
-  if (root == 0) return 0;
+  if (root == 0) {
+    return 0;
+  }
 
   pagenum_t pagenum = root;
   auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, pagenum);
@@ -1197,7 +1199,9 @@ pagenum_t redistribute_internal(int64_t table_id, pagenum_t root,
 bool bpt_find(int64_t table_id, pagenum_t root, bpt_key_t key, uint16_t *size,
               byte *value, int trx_id, lock_t *lock) {
   auto leaf_pagenum = find_leaf(table_id, root, key);
-  if (leaf_pagenum == 0) return false;
+  if (leaf_pagenum == 0) {
+    return false;
+  }
 
   auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
   if (lock == NULL &&
@@ -1346,7 +1350,9 @@ pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,
   }
 
   auto leaf_pagenum = find_leaf(table_id, root, key);
-  if (leaf_pagenum == 0) return 0;
+  if (leaf_pagenum == 0) {
+    return 0;
+  }
 
   auto *page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, leaf_pagenum);
 

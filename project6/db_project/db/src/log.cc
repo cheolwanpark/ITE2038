@@ -36,7 +36,6 @@ void __log(bool force_exit, const char *severity, const char *function_name,
   pthread_mutex_unlock(&debug_log_latch);
 #endif
   if (force_exit) {
-    shutdown_db();
     exit(-1);
   }
 }

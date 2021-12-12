@@ -82,4 +82,9 @@ void unpin_header(int64_t table_id);
 // count not pinned frames
 int count_free_frames();
 
+// flush all free frames
+// this function ignores all page lockings
+// this function is to flush updated data (after insertion) outside of the trx
+int buffer_flush_all_frames();
+
 #endif

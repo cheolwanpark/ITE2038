@@ -353,7 +353,7 @@ int free_buffer_manager() {
     if (pthread_mutex_destroy(&iter->page_latch)) {
       pthread_mutex_unlock(&buffer_manager_latch);
       LOG_ERR("failed to destroy page latch");
-      return 0;
+      return 1;
     }
   }
 
@@ -501,4 +501,16 @@ int count_free_frames() {
   }
   pthread_mutex_unlock(&buffer_manager_latch);
   return result;
+}
+
+int buffer_flush_all_frames() {
+  pthread_mutex_lock(&buffer_manager_latch);
+  auto iter = head;
+  for (auto iter = head; iter != NULL; iter = iter->next) {
+    if (iter->is_dirty)
+      file_write_page(iter->table_id, iter->page_num, &iter->frame);
+    pthread_mutex_unlock(&iter->page_latch);
+  }
+  pthread_mutex_unlock(&buffer_manager_latch);
+  return 0;
 }

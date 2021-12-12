@@ -7,6 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <set>
+
 #include "log.h"
 
 struct log_list_t {
@@ -17,7 +19,8 @@ struct log_list_t {
 uint64_t LSN = 1;
 pthread_mutex_t log_latch = PTHREAD_MUTEX_INITIALIZER;
 
-int log_fd = -1, logmsg_fd = -1;
+int log_fd = -1;
+FILE *logmsg_fp = NULL;
 byte *log_buffer = NULL;
 uint64_t log_buffer_size = 0;
 uint64_t log_buffer_max_size = INITIAL_LOG_BUFFER_SIZE;
@@ -52,12 +55,139 @@ int set_next_undo_lsn(log_record_t *rec, uint64_t val) {
   return 0;
 }
 
+int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
+  uint32_t log_size;
+  uint32_t current_position = 0;
+  uint64_t current_lsn = 0;
+
+  // allocate maximum size log_record (max slot length is 108)
+  log_record_t *rec =
+      (log_record_t *)malloc(sizeof(log_record_t) + 108 * 2 + 8);
+  if (rec == NULL) {
+    LOG_ERR("failed to allocate record struct, %s", strerror(errno));
+    return 1;
+  }
+
+  if (fprintf(logmsg_fp, "[ANALYSIS] Analysis pass start\n") < 0) {
+    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    return 1;
+  }
+
+  while (true) {
+    if (lseek(log_fd, current_position, SEEK_SET) < 0) {
+      LOG_ERR("failed to seek, %s", strerror(errno));
+      return 1;
+    }
+    if (read(log_fd, &log_size, sizeof(log_size)) != sizeof(log_size) ||
+        log_size == 0)
+      break;
+    if (lseek(log_fd, -4, SEEK_CUR) < 0) {
+      LOG_ERR("failed to seek, %s", strerror(errno));
+      return 1;
+    }
+
+    if (read(log_fd, rec, log_size) != log_size) break;
+
+    current_lsn = rec->lsn;
+    switch (rec->type) {
+      case BEGIN_LOG:
+        if (!losers.insert(rec->trx_id).second) {
+          LOG_ERR("%d already exists in losers", rec->trx_id);
+          return 1;
+        }
+        break;
+
+      case COMMIT_LOG:
+      case ROLLBACK_LOG:
+        if (losers.erase(rec->trx_id) == 0) {
+          LOG_ERR("%d is not in the losers", rec->trx_id);
+          return 1;
+        }
+        if (!winners.insert(rec->trx_id).second) {
+          LOG_ERR("%d already exists in winners", rec->trx_id);
+          return 1;
+        }
+        break;
+    }
+    current_position += log_size;
+  }
+  free(rec);
+
+  LSN = current_lsn + 1;
+
+  if (fprintf(logmsg_fp, "[ANALYSIS] Analysis success. Winner:") < 0) {
+    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    return 1;
+  }
+  for (auto id : winners) {
+    if (fprintf(logmsg_fp, " %d", id) < 0) {
+      LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+      return 1;
+    }
+  }
+  if (fprintf(logmsg_fp, ", Loser:") < 0) {
+    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    return 1;
+  }
+  for (auto id : losers) {
+    if (fprintf(logmsg_fp, " %d", id) < 0) {
+      LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+      return 1;
+    }
+  }
+  if (fprintf(logmsg_fp, "\n") < 0) {
+    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    return 1;
+  }
+  if (fflush(logmsg_fp) != 0) {
+    LOG_ERR("failed to flush logmsg file, %s", strerror(errno));
+    return 1;
+  }
+
+  return 0;
+}
+
+int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
+  return 0;
+}
+
+int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
+  return 0;
+}
+
+int recovery_process() {
+  std::set<trx_id_t> winners, losers;
+  pthread_mutex_lock(&log_latch);
+  if (analysis_phase(winners, losers)) {
+    LOG_ERR("failed to perform analysis!");
+    return 1;
+  }
+  if (redo_phase(winners, losers)) {
+    LOG_ERR("failed to perform redo!");
+    return 1;
+  }
+  if (undo_phase(winners, losers)) {
+    LOG_ERR("failed to perform undo!");
+    return 1;
+  }
+  pthread_mutex_unlock(&log_latch);
+  return 0;
+}
+
 // API functions
 int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
   // allocate log buffer
   log_buffer = (byte *)malloc(log_buffer_max_size);
   if (log_buffer == NULL) {
     LOG_ERR("failed to allocate log buffer");
+    return 1;
+  }
+
+  // open logmsg file
+  logmsg_fp = fopen(logmsg_path, "a+");
+  if (logmsg_fp == NULL) {
+    LOG_ERR("failed to open or create %s, errno: %s", logmsg_path,
+            strerror(errno));
     return 1;
   }
 
@@ -88,9 +218,9 @@ int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
               strerror(errno));
       return 1;
     }
-    if (lseek(log_fd, -sizeof(uint32_t), SEEK_END) <
-        0) {  // write logs beyond the end point (-4 is ignoring guard logsize)
-      LOG_ERR("failed to lseek, errno: %s", strerror(errno));
+
+    if (recovery_process()) {
+      LOG_ERR("failed to recovery!");
       return 1;
     }
   }
@@ -100,9 +230,11 @@ int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
 void free_recovery() {
   // flush all logs
   flush_log();
+  pthread_mutex_lock(&log_latch);
   free(log_buffer);
   if (log_fd >= 0) close(log_fd);
-  if (logmsg_fd >= 0) close(logmsg_fd);
+  if (logmsg_fp != NULL) fclose(logmsg_fp);
+  pthread_mutex_unlock(&log_latch);
 
   pthread_mutex_destroy(&log_latch);
 }
