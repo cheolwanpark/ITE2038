@@ -351,9 +351,7 @@ int free_buffer_manager() {
     if (iter->is_dirty)
       file_write_page(iter->table_id, iter->page_num, &iter->frame);
     if (pthread_mutex_destroy(&iter->page_latch)) {
-      pthread_mutex_unlock(&buffer_manager_latch);
-      LOG_ERR("failed to destroy page latch");
-      return 1;
+      LOG_WARN("failed to destroy page latch, %s", strerror(errno));
     }
   }
 

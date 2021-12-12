@@ -26,6 +26,7 @@ struct trx_t {
   lock_t* dummy_head;
   update_log_t* log_head;
   int releasing;
+  int visited;
   uint64_t last_lsn;
 };
 

@@ -133,6 +133,7 @@ int trx_begin() {
   new_trx->dummy_head = NULL;
   new_trx->log_head = NULL;
   new_trx->releasing = false;
+  new_trx->visited = false;
   new_trx->last_lsn = 0;
   auto res = trx_table.emplace(new_trx->id, new_trx);
   if (!res.second) {
@@ -953,6 +954,11 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
   if (!is_trx_assigned(target_trx->id) || is_running(target_trx) ||
       target_trx->releasing)
     return false;
+
+  // if visted before then there is cycle
+  if (target_trx->visited) return true;
+  target_trx->visited = true;
+
   auto *trx_lock_iter = target_trx->head;
   while (trx_lock_iter != NULL) {
     auto *sentinel = trx_lock_iter->sentinel;
@@ -960,10 +966,7 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
       auto *iter = sentinel->head;
       while (iter != NULL && iter != trx_lock_iter) {
         if (is_conflicting(iter, trx_lock_iter)) {
-          if (iter->owner_trx->id == checking_trx->id) {
-            return true;
-          } else if (is_deadlock(checking_trx, iter->owner_trx))
-            return true;
+          if (is_deadlock(checking_trx, iter->owner_trx)) return true;
           // we don't have to check locks after first x lock
           if (iter->lock_mode == X_LOCK) break;
         }
@@ -985,12 +988,19 @@ int is_deadlock(lock_t *lock) {
   }
   // mutexes are already locked in lock_acquire
 
+  // mark all trx as non-visited
+  for (auto &trx : trx_table) {
+    trx.second->visited = false;
+  }
+
   auto *sentinel = lock->sentinel;
   auto *checking_trx = lock->owner_trx;
+  checking_trx->visited = true;
   if (sentinel) {
     auto *iter = sentinel->head;
     while (iter != NULL && iter != lock) {
-      if (is_conflicting(iter, lock) && !iter->owner_trx->releasing) {
+      if (is_conflicting(iter, lock) && !iter->owner_trx->releasing &&
+          !iter->owner_trx->visited) {
         if (is_deadlock(checking_trx, iter->owner_trx)) return true;
         // we don't have to check locks after first x lock
         if (iter->lock_mode == X_LOCK) break;
