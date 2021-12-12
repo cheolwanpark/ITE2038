@@ -17,8 +17,10 @@ struct log_list_t {
 uint64_t LSN = 1;
 pthread_mutex_t log_latch = PTHREAD_MUTEX_INITIALIZER;
 
-log_list_t *log_head = NULL, *log_tail = NULL;
 int log_fd = -1, logmsg_fd = -1;
+byte *log_buffer = NULL;
+uint64_t log_buffer_size = 0;
+uint64_t log_buffer_max_size = INITIAL_LOG_BUFFER_SIZE;
 
 byte *get_old(log_record_t *rec) {
   if (rec == NULL) return NULL;
@@ -52,6 +54,14 @@ int set_next_undo_lsn(log_record_t *rec, uint64_t val) {
 
 // API functions
 int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
+  // allocate log buffer
+  log_buffer = (byte *)malloc(log_buffer_max_size);
+  if (log_buffer == NULL) {
+    LOG_ERR("failed to allocate log buffer");
+    return 1;
+  }
+
+  // open log file
   if (access(log_path, F_OK) != 0) {
     log_fd = open(log_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (log_fd < 0) {
@@ -90,6 +100,7 @@ int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
 void free_recovery() {
   // flush all logs
   flush_log();
+  free(log_buffer);
   if (log_fd >= 0) close(log_fd);
   if (logmsg_fd >= 0) close(logmsg_fd);
 
@@ -192,21 +203,14 @@ log_record_t *create_log_compensate(trx_t *trx, bpt_page_t *page,
 int push_into_log_buffer(log_record_t *rec) {
   if (rec == NULL) return 1;
 
-  log_list_t *new_node = (log_list_t *)malloc(sizeof(log_list_t));
-  if (new_node == NULL) {
-    LOG_ERR("failed to allocate");
-    return 1;
-  }
-  new_node->next = NULL;
-  new_node->rec = rec;
-
   pthread_mutex_lock(&log_latch);
-  if (log_tail == NULL) {  // no log exists
-    log_head = log_tail = new_node;
-  } else {
-    log_tail->next = new_node;
-    log_tail = new_node;
+  if (log_buffer_size + rec->log_size > log_buffer_max_size) {
+    while (log_buffer_size + rec->log_size > log_buffer_max_size)
+      log_buffer_max_size *= 2;
+    log_buffer = (byte *)realloc(log_buffer, log_buffer_max_size);
   }
+  memcpy(log_buffer + log_buffer_size, rec, rec->log_size);
+  log_buffer_size += rec->log_size;
   pthread_mutex_unlock(&log_latch);
 
   return 0;
@@ -221,33 +225,25 @@ int flush_log() {
     return 1;
   }
 
-  // LOG_INFO("flushing!");
-  while (log_head != NULL) {
-    auto *current = log_head;
-    log_head = log_head->next;
-
-    auto *rec = current->rec;
-    if (write(log_fd, rec, rec->log_size) != rec->log_size) {
-      LOG_ERR("cannot write log, errno: %s", strerror(errno));
-      return 1;
-    }
-    // LOG_INFO("writed %d", rec->len);
-    if (rec->type != UPDATE_LOG && rec->type != COMPENSATE_LOG) free(rec);
-    free(current);
+  if (write(log_fd, log_buffer, log_buffer_size) != log_buffer_size) {
+    LOG_ERR("cannot flush log, errno: %s", strerror(errno));
+    return 1;
   }
-  log_head = log_tail = NULL;
-
+  if (fsync(log_fd) < 0) {
+    LOG_ERR("cannot sync log file, errno: %s", strerror(errno));
+    return 1;
+  }
   // write guard log_size (for reading)
   uint32_t guard = 0;
   if (write(log_fd, &guard, sizeof(guard)) != sizeof(guard)) {
     LOG_ERR("cannot write log, errno: %s", strerror(errno));
     return 1;
   }
-
   if (fsync(log_fd) < 0) {
     LOG_ERR("cannot sync log file, errno: %s", strerror(errno));
     return 1;
   }
+  log_buffer_size = 0;
   pthread_mutex_unlock(&log_latch);
   return 0;
 }

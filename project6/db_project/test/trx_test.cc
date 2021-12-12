@@ -17,8 +17,8 @@
 const long long TABLE_NUMBER = 2;
 const long long RECORD_NUMBER = 10000;
 
-const int TRANSFER_COUNT = 10000;
-const int SCAN_COUNT = 100;
+const int TRANSFER_COUNT = 5000;
+const int SCAN_COUNT = 200;
 const int TRANSFER_THREAD_NUM = 10;
 const int SCAN_THREAD_NUM = 3;
 
@@ -119,7 +119,7 @@ void __transfer_thread_func(void *arg) {
       return;
     }
 
-    if ((i + 1) % 5000 == 0)
+    if ((i + 1) % 1000 == 0)
       LOG_INFO("%dth transfer complete in %d", i + 1, pthread_self());
   }
   LOG_INFO("Transfer thread is done.");

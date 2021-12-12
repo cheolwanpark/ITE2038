@@ -33,7 +33,12 @@ std::vector<clock_t> trx_log_runtime;
 
 // trx, lock relevent datatypes
 struct update_log_t {
-  log_record_t *rec;
+  int64_t table_id;
+  pagenum_t page_id;
+  uint16_t offset;
+  uint16_t len;
+  uint64_t lsn;
+  byte *bef;
   update_log_t *next;
 };
 
@@ -149,13 +154,17 @@ int trx_begin() {
   // add log
   auto *rec = create_log(new_trx, BEGIN_LOG);
   if (rec == NULL) {
+    free(new_trx);
     LOG_ERR("failed to create log");
     return 0;
   }
   if (push_into_log_buffer(rec)) {
+    free(new_trx);
+    free(rec);
     LOG_ERR("failed to push into log buffer");
     return 0;
   }
+  free(rec);
 
   return new_trx->id;
 }
@@ -189,9 +198,11 @@ int trx_commit(trx_id_t trx_id) {
   }
   if (push_into_log_buffer(rec)) {
     free(trx);
+    free(rec);
     LOG_ERR("failed to push into log buffer");
     return 0;
   }
+  free(rec);
 
   // flush all logs
   if (flush_log()) {
@@ -205,7 +216,7 @@ int trx_commit(trx_id_t trx_id) {
     auto *current = log_iter;
     log_iter = log_iter->next;
     // this record is update log so trx should release it
-    free(current->rec);
+    free(current->bef);
     free(current);
   }
 
@@ -263,38 +274,38 @@ int trx_abort(trx_id_t trx_id) {
   auto *log_iter = trx->log_head;
   page_t *page;
   while (log_iter != NULL) {
-    auto *rec = log_iter->rec;
     // overwrite records with log
-    page = buffer_get_page_ptr<page_t>(rec->table_id, rec->page_num);
+    page = buffer_get_page_ptr<page_t>(log_iter->table_id, log_iter->page_id);
+
     uint32_t next_undo_lsn = 0;
-    if (log_iter->next != NULL) {
-      if (log_iter->next->rec->lsn != rec->prev_lsn) {
-        LOG_ERR("invalid order sequence exists!");
-        return 0;
-      }
-      next_undo_lsn = rec->prev_lsn;
-    }
+    if (log_iter->next != NULL) next_undo_lsn = log_iter->next->lsn;
+
     auto *new_rec = create_log_compensate(
-        trx, (bpt_page_t *)page, rec->table_id, rec->page_num, rec->offset,
-        rec->len, get_new(rec), get_old(rec), next_undo_lsn);
+        trx, (bpt_page_t *)page, log_iter->table_id, log_iter->page_id,
+        log_iter->offset, log_iter->len, page->data + log_iter->offset,
+        log_iter->bef, next_undo_lsn);
     if (new_rec == NULL) {
       LOG_ERR("failed to create new compensate log");
       return 0;
     }
-    memcpy(page->data + rec->offset, get_old(rec), rec->len);
-    set_dirty((page_t *)page);
+
+    memcpy(page->data + log_iter->offset, log_iter->bef, log_iter->len);
+    set_dirty(page);
     if (push_into_log_buffer(new_rec)) {
+      free(new_rec);
       LOG_ERR("failed to push log into log buffer");
       return 0;
     }
-    if (trx_log_update(trx, new_rec)) {
-      LOG_ERR("failed to add log into trx");
-      return 0;
-    }
-    unpin((page_t *)page);
+    unpin(page);
+    free(new_rec);
 
     // update iterator
+    auto *current = log_iter;
     log_iter = log_iter->next;
+
+    // free update log on trx
+    free(current->bef);
+    free(current);
   }
 
   // add log
@@ -306,23 +317,16 @@ int trx_abort(trx_id_t trx_id) {
   }
   if (push_into_log_buffer(rec)) {
     free(trx);
+    free(rec);
     LOG_ERR("failed to push into log buffer");
     return 0;
   }
+  free(rec);
 
   // flush all logs
   if (flush_log()) {
     LOG_ERR("failed to flush log");
     return 0;
-  }
-
-  // free all logs
-  log_iter = trx->log_head;  // this is updated with compensate logs
-  while (log_iter != NULL) {
-    auto *current = log_iter;
-    log_iter = log_iter->next;
-    free(current->rec);
-    free(current);
   }
 
   // destroy all dummy locks
@@ -366,7 +370,7 @@ int trx_abort(trx_id_t trx_id) {
 }
 
 int trx_log_update(trx_t *trx, log_record_t *rec) {
-  if (trx == NULL || rec == NULL) {
+  if (trx == NULL || rec == NULL || rec->type != UPDATE_LOG) {
     LOG_ERR("invalid parameters");
     return 1;
   }
@@ -381,7 +385,18 @@ int trx_log_update(trx_t *trx, log_record_t *rec) {
     LOG_ERR("failed to allocate new update log object");
     return 1;
   }
-  result->rec = rec;
+  result->table_id = rec->table_id;
+  result->page_id = rec->page_num;
+  result->offset = rec->offset;
+  result->len = rec->len;
+  result->lsn = rec->lsn;
+  result->bef = (byte *)malloc(rec->len);
+  if (result->bef == NULL) {
+    free(result);
+    LOG_ERR("failed to allocate bef buffer");
+    return 1;
+  }
+  memcpy(result->bef, get_old(rec), rec->len);
 
   // push it into transaction
   result->next = trx->log_head;

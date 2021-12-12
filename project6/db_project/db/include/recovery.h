@@ -26,6 +26,8 @@ constexpr int32_t COMMIT_LOG = 2;
 constexpr int32_t ROLLBACK_LOG = 3;
 constexpr int32_t COMPENSATE_LOG = 4;
 
+constexpr uint64_t INITIAL_LOG_BUFFER_SIZE = 1024 * 1024;
+
 int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path);
 
 void free_recovery();

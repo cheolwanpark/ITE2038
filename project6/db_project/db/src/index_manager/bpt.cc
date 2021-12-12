@@ -1283,21 +1283,24 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
         set_dirty((page_t *)page);
         if (trx != NULL) {
           if (push_into_log_buffer(rec)) {
+            free(rec);
             LOG_ERR("failed to push log into log buffer");
             return false;
           }
           if (trx_log_update(trx, rec)) {
+            free(rec);
             LOG_ERR("failed to add log into the trx");
             return false;
           }
         }
       }
+      if (rec != NULL) free(rec);
 
-      unpin((page_t *)page);
+      unpin(page);
       return true;
     }
   }
-  unpin((page_t *)page);
+  unpin(page);
   return false;
 }
 pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,

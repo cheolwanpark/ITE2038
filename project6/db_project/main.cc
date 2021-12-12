@@ -10,14 +10,14 @@
 #include "recovery.h"
 #include "trx.h"
 
-const int TRANSFER_THREAD_NUM = 3;
-const int SCAN_THREAD_NUM = 1;
+const int TRANSFER_THREAD_NUM = 8;
+const int SCAN_THREAD_NUM = 3;
 
 const long long TABLE_NUMBER = 2;
-const long long RECORD_NUMBER = 50;
+const long long RECORD_NUMBER = 10000;
 
-const int TRANSFER_COUNT = 10000;
-const int SCAN_COUNT = 1000;
+const int TRANSFER_COUNT = 5000;
+const int SCAN_COUNT = 200;
 
 const long long INITIAL_MONEY = 100000;
 const int MAX_MONEY_TRANSFERRED = 100;
@@ -36,7 +36,7 @@ int single_thread();
 int multi_thread();
 
 // int main(int argc, char **argv) { return single_thread(); }
-// int main(int argc, char **argv) { return print_log(1000); }
+// int main(int argc, char **argv) { return print_log(2000); }
 int main(int argc, char **argv) { return multi_thread(); }
 
 int print_log(int n) {
@@ -255,7 +255,7 @@ void *transfer_thread_func(void *arg) {
       }
     }
 
-    if ((i + 1) % 5000 == 0) LOG_INFO("%dth transfer complete", i + 1);
+    if ((i + 1) % 1000 == 0) LOG_INFO("%dth transfer complete", i + 1);
   }
   LOG_INFO("Transfer done.");
   return NULL;
