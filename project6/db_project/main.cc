@@ -19,7 +19,7 @@ const long long RECORD_NUMBER = 10000;
 const int TRANSFER_COUNT = 5000;
 const int SCAN_COUNT = 200;
 
-const int LONG_TRX_TEST_BUF_SIZE = 50;
+const int LONG_TRX_TEST_BUF_SIZE = 10;
 const int TRANSFER_PER_TRX_IN_LONG_TRX = 100;
 
 const long long INITIAL_MONEY = 100000;
@@ -41,7 +41,7 @@ int multi_thread_long_trx();
 int scan_after_recovery();
 
 // int main(int argc, char **argv) { return single_thread(); }
-// int main(int argc, char **argv) { return print_log(2000); }
+// int main(int argc, char **argv) { return print_log(20000); }
 // int main(int argc, char **argv) { return multi_thread(); }
 // int main(int argc, char **argv) { return multi_thread_long_trx(); }
 int main(int argc, char **argv) { return scan_after_recovery(); }

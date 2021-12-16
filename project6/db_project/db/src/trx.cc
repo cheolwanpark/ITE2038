@@ -273,30 +273,33 @@ int trx_abort(trx_id_t trx_id) {
 
   // revert all updates
   auto *log_iter = trx->log_head;
-  page_t *page;
+  bpt_page_t *page;
   while (log_iter != NULL) {
     // overwrite records with log
-    page = buffer_get_page_ptr<page_t>(log_iter->table_id, log_iter->page_id);
+    page =
+        buffer_get_page_ptr<bpt_page_t>(log_iter->table_id, log_iter->page_id);
 
     uint32_t next_undo_lsn = 0;
     if (log_iter->next != NULL) next_undo_lsn = log_iter->next->lsn;
 
     auto *new_rec = create_log_compensate(
-        trx, (bpt_page_t *)page, log_iter->table_id, log_iter->page_id,
-        log_iter->offset, log_iter->len, page->data + log_iter->offset,
-        log_iter->bef, next_undo_lsn);
+        trx, log_iter->table_id, log_iter->page_id, log_iter->offset,
+        log_iter->len, page->page.data + log_iter->offset, log_iter->bef,
+        next_undo_lsn);
     if (new_rec == NULL) {
       LOG_ERR("failed to create new compensate log");
       return 0;
     }
 
-    memcpy(page->data + log_iter->offset, log_iter->bef, log_iter->len);
+    memcpy(page->page.data + log_iter->offset, log_iter->bef, log_iter->len);
     set_dirty(page);
     if (push_into_log_buffer(new_rec)) {
       free(new_rec);
       LOG_ERR("failed to push log into log buffer");
       return 0;
     }
+    page->header.page_lsn = new_rec->lsn;
+    set_dirty(page);
     unpin(page);
     free(new_rec);
 
@@ -1009,6 +1012,69 @@ int is_deadlock(lock_t *lock) {
     }
   }
   return false;
+}
+
+void set_trx_counter(trx_id_t val) {
+  pthread_mutex_lock(&trx_table_latch);
+  trx_counter = val;
+  pthread_mutex_unlock(&trx_table_latch);
+}
+
+int add_active_trx(trx_id_t trx_id) {
+  pthread_mutex_lock(&trx_table_latch);
+  if (is_trx_assigned(trx_id)) {
+    LOG_ERR("%d already exists in trx_table", trx_id);
+    return 1;
+  }
+  trx_t *new_trx = (trx_t *)malloc(sizeof(trx_t));
+  if (new_trx == NULL) {
+    pthread_mutex_unlock(&trx_table_latch);
+    LOG_ERR("failed to allocate new transaction object");
+    return 1;
+  }
+  new_trx->id = trx_id;
+  new_trx->start_time = clock();
+  new_trx->head = NULL;
+  new_trx->dummy_head = NULL;
+  new_trx->log_head = NULL;
+  new_trx->releasing = false;
+  new_trx->visited = false;
+  new_trx->last_lsn = 0;
+
+  auto res = trx_table.emplace(new_trx->id, new_trx);
+  if (!res.second) {
+    free(new_trx);
+    pthread_mutex_unlock(&trx_table_latch);
+    LOG_ERR("insertion failed");
+    return 1;
+  }
+  pthread_mutex_unlock(&trx_table_latch);
+  return 0;
+}
+
+int remove_active_trx(trx_id_t trx_id) {
+  pthread_mutex_lock(&trx_table_latch);
+  if (!is_trx_assigned(trx_id)) {
+    LOG_ERR("there is no trx %d", trx_id);
+    return 1;
+  }
+  auto *trx = trx_table[trx_id];
+  free(trx);
+  trx_table.erase(trx_id);
+  pthread_mutex_unlock(&trx_table_latch);
+  return 0;
+}
+
+trx_t *get_trx(trx_id_t trx_id) {
+  pthread_mutex_lock(&trx_table_latch);
+  auto find = trx_table.find(trx_id);
+  if (find != trx_table.end()) {
+    pthread_mutex_unlock(&trx_table_latch);
+    return find->second;
+  } else {
+    pthread_mutex_unlock(&trx_table_latch);
+    return NULL;
+  }
 }
 
 double calc_avg(const std::vector<clock_t> &v) {

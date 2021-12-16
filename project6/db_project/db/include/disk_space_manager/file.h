@@ -34,6 +34,9 @@ union page_node_t {
 // Open existing database file or create one if not existed.
 int64_t file_open_table_file(const char *pathname);
 
+// Open existing database file if it is not loaded.
+int64_t file_open_table_file(int64_t table_id);
+
 // Expand file twice and create new free pages
 // for page allocation in buffer layer
 // return 0 on success

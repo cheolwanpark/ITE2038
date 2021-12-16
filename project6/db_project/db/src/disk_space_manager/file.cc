@@ -250,6 +250,16 @@ int64_t file_open_table_file(const char* pathname) {
   return table_id;
 }
 
+int64_t file_open_table_file(int64_t table_id) {
+  auto find = table_id_map.find(table_id);
+  if (find == table_id_map.end()) {
+    char filename[128];
+    sprintf(filename, "DATA%lld", table_id);
+    return file_open_table_file(filename);
+  } else
+    return table_id;
+}
+
 int file_expand_twice(int64_t table_id, pagenum_t* start, pagenum_t* end,
                       uint64_t* num_new_pages) {
   if (table_id < 0) {

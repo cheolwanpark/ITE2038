@@ -1271,9 +1271,9 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
     if (slots[i].key == key) {
       log_record_t *rec = NULL;
       if (trx != NULL && value != NULL) {
-        rec = create_log_update(trx, (bpt_page_t *)page, table_id, leaf_pagenum,
-                                slots[i].offset, new_val_size,
-                                page->page.data + slots[i].offset, value);
+        rec = create_log_update(trx, table_id, leaf_pagenum, slots[i].offset,
+                                new_val_size, page->page.data + slots[i].offset,
+                                value);
         if (rec == NULL) {
           LOG_ERR("failed to make update log");
           return false;
@@ -1284,7 +1284,7 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
         auto copy_size =
             new_val_size < slots[i].size ? new_val_size : slots[i].size;
         memcpy(page->page.data + slots[i].offset, value, copy_size);
-        set_dirty((page_t *)page);
+        set_dirty(page);
         if (trx != NULL) {
           if (push_into_log_buffer(rec)) {
             free(rec);
@@ -1296,6 +1296,8 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
             LOG_ERR("failed to add log into the trx");
             return false;
           }
+          page->leaf_data.header.page_lsn = rec->lsn;
+          set_dirty(page);
         }
       }
       if (rec != NULL) free(rec);

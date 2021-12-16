@@ -34,14 +34,13 @@ void free_recovery();
 
 log_record_t *create_log(trx_t *trx, int32_t type);
 
-log_record_t *create_log_update(trx_t *trx, bpt_page_t *page, int64_t table_id,
-                                pagenum_t page_id, uint16_t offset,
-                                uint16_t len, byte *old_img, byte *new_img);
+log_record_t *create_log_update(trx_t *trx, int64_t table_id, pagenum_t page_id,
+                                uint16_t offset, uint16_t len, byte *old_img,
+                                byte *new_img);
 
-log_record_t *create_log_compensate(trx_t *trx, bpt_page_t *page,
-                                    int64_t table_id, pagenum_t page_id,
-                                    uint16_t offset, uint16_t len,
-                                    byte *old_img, byte *new_img,
+log_record_t *create_log_compensate(trx_t *trx, int64_t table_id,
+                                    pagenum_t page_id, uint16_t offset,
+                                    uint16_t len, byte *old_img, byte *new_img,
                                     uint64_t next_undo_seq);
 
 byte *get_old(log_record_t *rec);

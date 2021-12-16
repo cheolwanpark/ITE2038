@@ -45,6 +45,13 @@ lock_t* lock_acquire(bpt_page_t** page_ptr, int64_t table_id, pagenum_t page_id,
 int lock_release(lock_t* lock_obj);
 trx_t* get_trx(lock_t* lock);
 
+// APIs for recovery
+void set_trx_counter(trx_id_t val);
+int add_active_trx(trx_id_t trx_id);
+int remove_active_trx(trx_id_t trx_id);
+trx_t* get_trx(trx_id_t trx_id);
+
+// APIs for debugging
 void print_debugging_infos();
 
 #endif
