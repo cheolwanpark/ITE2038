@@ -21,6 +21,12 @@ struct log_list_t {
 };
 
 uint64_t LSN = 1;
+
+// mutex
+#ifdef __unix__
+#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER \
+  PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+#endif
 pthread_mutex_t log_latch = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
 
 int log_fd = -1;
