@@ -461,10 +461,7 @@ lock_t *create_lock(int64_t table_id, int64_t record_id, int slotnum,
 
 void destroy_lock(lock_t *lock) {
   if (lock == NULL) return;
-  if (pthread_cond_destroy(&lock->cond)) {
-    LOG_ERR(6, "failed to destroy condition variable");
-    return;
-  }
+  pthread_cond_destroy(&lock->cond);
   free(lock);
 }
 
@@ -525,12 +522,7 @@ int free_lock_table() {
     running_trx_ids.push_back(iter.first);
   }
   for (auto trx_id : running_trx_ids) {
-    if (trx_abort(trx_id) != trx_id) {
-      pthread_mutex_unlock(&trx_table_latch);
-      pthread_mutex_unlock(&lock_table_latch);
-      LOG_ERR(6, "failed to abort the trx %d", trx_id);
-      return 1;
-    }
+    trx_abort(trx_id);
   }
   trx_table.clear();
   pthread_mutex_unlock(&trx_table_latch);
@@ -541,11 +533,7 @@ int free_lock_table() {
     while (lock != NULL) {
       auto *tmp = lock;
       lock = lock->next;
-      if (pthread_cond_destroy(&tmp->cond)) {
-        LOG_ERR(6, "failed to destroy condition variable!");
-        return 1;
-      }
-      free(tmp);
+      destroy_lock(tmp);
     }
   }
   lock_table.clear();
@@ -810,7 +798,6 @@ lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
     if (trx_abort(trx_id) != trx_id) LOG_WARN("failed to abort trx");
-    *page_ptr = buffer_get_page_ptr<bpt_page_t>(table_id, page_id);
     return NULL;
   }
   pthread_mutex_unlock(&trx_table_latch);
@@ -852,10 +839,7 @@ lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
 };
 
 int __lock_release(lock_t *lock_obj) {
-  if (lock_obj == NULL) {
-    LOG_WARN("invalid parameters");
-    return 1;
-  }
+  if (lock_obj == NULL) return 0;
 
   auto *iter = lock_obj->next;
   auto rid = lock_obj->record_id;
@@ -907,7 +891,6 @@ trx_t *get_trx(lock_t *lock) {
 
 int is_conflicting(lock_t *a, lock_t *b) {
   if (a == NULL || b == NULL) {
-    LOG_ERR(6, "invalid parameters");
     return false;
   }
 
@@ -926,7 +909,6 @@ int is_conflicting(lock_t *a, lock_t *b) {
 
 lock_t *find_conflicting_lock(lock_t *lock) {
   if (lock == NULL) {
-    LOG_ERR(6, "invalid parameters");
     return NULL;
   }
   if (lock->sentinel == NULL) {
@@ -983,7 +965,6 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
 
 int is_deadlock(lock_t *lock) {
   if (lock == NULL) {
-    LOG_ERR(6, "invalid parameters");
     return false;
   }
   if (lock->sentinel == NULL || lock->owner_trx == NULL) {
