@@ -61,13 +61,13 @@ frame_t *get_frame(int64_t table_id, pagenum_t pagenum);
 // to preserve interface , Disk Space Manager uses this functions internally
 void __buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
   if (table_id < 0 || dest == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
   const page_t *page_ptr = buffer_get_page_ptr(table_id, pagenum);
   if (page_ptr == NULL) {
-    LOG_ERR("failed to get page pointer");
+    LOG_ERR(3, "failed to get page pointer");
     return;
   }
 
@@ -77,7 +77,7 @@ void __buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
 void __buffer_write_page(int64_t table_id, pagenum_t pagenum,
                          const page_t *src) {
   if (table_id < 0 || src == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -93,7 +93,7 @@ void __buffer_write_page(int64_t table_id, pagenum_t pagenum,
 
 void __unpin(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -104,21 +104,21 @@ void __unpin(int64_t table_id, pagenum_t pagenum) {
     return;
   }
   if (pthread_mutex_unlock(&frame->page_latch)) {
-    LOG_ERR("failed to unlock page latch");
+    LOG_ERR(3, "failed to unlock page latch");
     return;
   }
 }
 
 frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return NULL;
   }
 
   // buffer_manager_latch is already locked in buffer_get_page_ptr
   frame_t *frame = buffer_evict_frame();
   if (frame == NULL) {
-    LOG_ERR("failed to evict frame");
+    LOG_ERR(3, "failed to evict frame");
     return NULL;
   }
   frame->table_id = table_id;
@@ -131,7 +131,7 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
   auto res = frame_map.emplace(frame_id, frame);
   if (!res.second) {
     pthread_mutex_unlock(&frame_map_latch);
-    LOG_ERR("failed to emplace into the frame map");
+    LOG_ERR(3, "failed to emplace into the frame map");
     return NULL;
   }
   auto hash_key = frame_map.hash_function()(frame_id);
@@ -151,7 +151,7 @@ frame_t *buffer_evict_frame() {
       iter = iter->prev;
   }
   if (iter == NULL) {
-    LOG_ERR("all buffer frame is pinned, cannot evict frame");
+    LOG_ERR(3, "all buffer frame is pinned, cannot evict frame");
     return NULL;
   }
 
@@ -159,7 +159,7 @@ frame_t *buffer_evict_frame() {
   if (iter->is_dirty) {
     // flush all logs
     if (flush_log()) {
-      LOG_ERR("failed to flush logs");
+      LOG_ERR(3, "failed to flush logs");
       return NULL;
     }
 
@@ -187,7 +187,7 @@ frame_t *buffer_evict_frame() {
 
 page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return NULL;
   }
 
@@ -197,14 +197,14 @@ page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
     result = buffer_load_page(table_id, pagenum);
     if (result == NULL) {
       pthread_mutex_unlock(&buffer_manager_latch);
-      LOG_ERR("failed to load page");
+      LOG_ERR(3, "failed to load page");
       return NULL;
     }
   }
 
   set_LRU_head(result);
   if (pthread_mutex_lock(&result->page_latch)) {
-    LOG_ERR("failed to lock page latch");
+    LOG_ERR(3, "failed to lock page latch");
     return NULL;
   }
   pthread_mutex_unlock(&buffer_manager_latch);
@@ -214,7 +214,7 @@ page_t *buffer_get_page_ptr(int64_t table_id, pagenum_t pagenum) {
 
 void set_dirty(page_t *page) {
   if (page == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -224,7 +224,7 @@ void set_dirty(page_t *page) {
 
 frame_t *find_frame(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return NULL;
   }
 
@@ -252,7 +252,7 @@ frame_t *find_frame(int64_t table_id, pagenum_t pagenum) {
 
 void set_LRU_head(frame_t *node) {
   if (node == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -281,7 +281,7 @@ void set_LRU_head(frame_t *node) {
 
 void set_LRU_tail(frame_t *node) {
   if (node == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -310,14 +310,14 @@ void set_LRU_tail(frame_t *node) {
 
 int init_buffer_manager(int num_buf) {
   if (num_buf < 1) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return 1;
   }
 
   pthread_mutex_lock(&buffer_manager_latch);
   frames = (frame_t *)malloc(num_buf * sizeof(frame_t));
   if (frames == NULL) {
-    LOG_ERR("failed to allocate buffer frames");
+    LOG_ERR(3, "failed to allocate buffer frames");
     return 1;
   }
 
@@ -367,7 +367,7 @@ int free_buffer_manager() {
 
 pagenum_t buffer_alloc_page(int64_t table_id) {
   if (table_id < 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return 0;
   }
 
@@ -379,7 +379,7 @@ pagenum_t buffer_alloc_page(int64_t table_id) {
     if (file_expand_twice(table_id, &start, &end, &num_new_pages) ||
         start == 0) {
       unpin(header_page);
-      LOG_ERR("failed to expand file");
+      LOG_ERR(3, "failed to expand file");
       return 0;
     }
     // connect expanded list into header page
@@ -399,7 +399,7 @@ pagenum_t buffer_alloc_page(int64_t table_id) {
 
 void buffer_free_page(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0 || pagenum < 1) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -423,7 +423,7 @@ void buffer_free_page(int64_t table_id, pagenum_t pagenum) {
 
 void buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
   if (table_id < 0 || dest == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -432,7 +432,7 @@ void buffer_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest) {
 
 void buffer_read_header_page(int64_t table_id, header_page_t *dest) {
   if (table_id < 0 || dest == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -441,7 +441,7 @@ void buffer_read_header_page(int64_t table_id, header_page_t *dest) {
 
 void buffer_write_page(int64_t table_id, pagenum_t pagenum, const page_t *src) {
   if (table_id < 0 || src == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -450,7 +450,7 @@ void buffer_write_page(int64_t table_id, pagenum_t pagenum, const page_t *src) {
 
 void buffer_write_header_page(int64_t table_id, const header_page_t *src) {
   if (table_id < 0 || src == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -459,7 +459,7 @@ void buffer_write_header_page(int64_t table_id, const header_page_t *src) {
 
 void unpin(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
@@ -468,20 +468,20 @@ void unpin(int64_t table_id, pagenum_t pagenum) {
 
 void unpin(page_t *page) {
   if (page == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 
   frame_t *frame = (frame_t *)page;
   if (pthread_mutex_unlock(&frame->page_latch)) {
-    LOG_ERR("failed to unlock page latch");
+    LOG_ERR(3, "failed to unlock page latch");
     return;
   }
 }
 
 void unpin_header(int64_t table_id) {
   if (table_id < 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(3, "invalid parameters");
     return;
   }
 

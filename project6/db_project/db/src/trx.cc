@@ -124,7 +124,7 @@ int trx_begin() {
   trx_t *new_trx = (trx_t *)malloc(sizeof(trx_t));
   if (new_trx == NULL) {
     pthread_mutex_unlock(&trx_table_latch);
-    LOG_ERR("failed to allocate new transaction object");
+    LOG_ERR(6, "failed to allocate new transaction object");
     return 0;
   }
   new_trx->id = trx_counter;
@@ -139,7 +139,7 @@ int trx_begin() {
   if (!res.second) {
     free(new_trx);
     pthread_mutex_unlock(&trx_table_latch);
-    LOG_ERR("insertion failed");
+    LOG_ERR(6, "insertion failed");
     return 0;
   }
   ++trx_counter;
@@ -156,13 +156,13 @@ int trx_begin() {
   auto *rec = create_log(new_trx, BEGIN_LOG);
   if (rec == NULL) {
     free(new_trx);
-    LOG_ERR("failed to create log");
+    LOG_ERR(6, "failed to create log");
     return 0;
   }
   if (push_into_log_buffer(rec)) {
     free(new_trx);
     free(rec);
-    LOG_ERR("failed to push into log buffer");
+    LOG_ERR(6, "failed to push into log buffer");
     return 0;
   }
   free(rec);
@@ -180,7 +180,7 @@ int trx_commit(trx_id_t trx_id) {
   if (!is_trx_assigned(trx_id)) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("there is no trx with id = %d", trx_id);
+    LOG_ERR(6, "there is no trx with id = %d", trx_id);
     return 0;
   }
   auto *trx = trx_table[trx_id];
@@ -194,20 +194,20 @@ int trx_commit(trx_id_t trx_id) {
   auto *rec = create_log(trx, COMMIT_LOG);
   if (rec == NULL) {
     free(trx);
-    LOG_ERR("failed to create log");
+    LOG_ERR(6, "failed to create log");
     return 0;
   }
   if (push_into_log_buffer(rec)) {
     free(trx);
     free(rec);
-    LOG_ERR("failed to push into log buffer");
+    LOG_ERR(6, "failed to push into log buffer");
     return 0;
   }
   free(rec);
 
   // flush all logs
   if (flush_log()) {
-    LOG_ERR("failed to flush log");
+    LOG_ERR(6, "failed to flush log");
     return 0;
   }
 
@@ -237,7 +237,7 @@ int trx_commit(trx_id_t trx_id) {
     if (__lock_release(current)) {
       pthread_mutex_unlock(&trx_table_latch);
       pthread_mutex_unlock(&lock_table_latch);
-      LOG_ERR("failed to release lock");
+      LOG_ERR(6, "failed to release lock");
       return 0;
     }
   }
@@ -264,7 +264,7 @@ int trx_abort(trx_id_t trx_id) {
   if (!is_trx_assigned(trx_id)) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("there is no trx with id = %d", trx_id);
+    LOG_ERR(6, "there is no trx with id = %d", trx_id);
     return 0;
   }
   auto *trx = trx_table[trx_id];
@@ -287,7 +287,7 @@ int trx_abort(trx_id_t trx_id) {
         log_iter->len, page->page.data + log_iter->offset, log_iter->bef,
         next_undo_lsn);
     if (new_rec == NULL) {
-      LOG_ERR("failed to create new compensate log");
+      LOG_ERR(6, "failed to create new compensate log");
       return 0;
     }
 
@@ -295,7 +295,7 @@ int trx_abort(trx_id_t trx_id) {
     set_dirty(page);
     if (push_into_log_buffer(new_rec)) {
       free(new_rec);
-      LOG_ERR("failed to push log into log buffer");
+      LOG_ERR(6, "failed to push log into log buffer");
       return 0;
     }
     page->header.page_lsn = new_rec->lsn;
@@ -316,20 +316,20 @@ int trx_abort(trx_id_t trx_id) {
   auto *rec = create_log(trx, ROLLBACK_LOG);
   if (rec == NULL) {
     free(trx);
-    LOG_ERR("failed to create log");
+    LOG_ERR(6, "failed to create log");
     return 0;
   }
   if (push_into_log_buffer(rec)) {
     free(trx);
     free(rec);
-    LOG_ERR("failed to push into log buffer");
+    LOG_ERR(6, "failed to push into log buffer");
     return 0;
   }
   free(rec);
 
   // flush all logs
   if (flush_log()) {
-    LOG_ERR("failed to flush log");
+    LOG_ERR(6, "failed to flush log");
     return 0;
   }
 
@@ -351,7 +351,7 @@ int trx_abort(trx_id_t trx_id) {
     if (__lock_release(current)) {
       pthread_mutex_unlock(&trx_table_latch);
       pthread_mutex_unlock(&lock_table_latch);
-      LOG_ERR("failed to release lock");
+      LOG_ERR(6, "failed to release lock");
       return 0;
     }
   }
@@ -375,7 +375,7 @@ int trx_abort(trx_id_t trx_id) {
 
 int trx_log_update(trx_t *trx, log_record_t *rec) {
   if (trx == NULL || rec == NULL || rec->type != UPDATE_LOG) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(6, "invalid parameters");
     return 1;
   }
 
@@ -386,7 +386,7 @@ int trx_log_update(trx_t *trx, log_record_t *rec) {
   // create update log object
   update_log_t *result = (update_log_t *)malloc(sizeof(update_log_t));
   if (result == NULL) {
-    LOG_ERR("failed to allocate new update log object");
+    LOG_ERR(6, "failed to allocate new update log object");
     return 1;
   }
   result->table_id = rec->table_id;
@@ -397,7 +397,7 @@ int trx_log_update(trx_t *trx, log_record_t *rec) {
   result->bef = (byte *)malloc(rec->len);
   if (result->bef == NULL) {
     free(result);
-    LOG_ERR("failed to allocate bef buffer");
+    LOG_ERR(6, "failed to allocate bef buffer");
     return 1;
   }
   memcpy(result->bef, get_old(rec), rec->len);
@@ -439,12 +439,12 @@ lock_list_t &get_lock_list(int64_t table_id, pagenum_t page_id) {
 lock_t *create_lock(int64_t table_id, int64_t record_id, int slotnum,
                     int mode) {
   if (mode != S_LOCK && mode != X_LOCK) {
-    LOG_ERR("invalid lock mode");
+    LOG_ERR(6, "invalid lock mode");
     return NULL;
   }
   lock_t *new_lock = (lock_t *)malloc(sizeof(lock_t));
   if (new_lock == NULL) {
-    LOG_ERR("failed to allocate new lock object");
+    LOG_ERR(6, "failed to allocate new lock object");
     return NULL;
   }
   new_lock->prev = new_lock->next = NULL;
@@ -462,7 +462,7 @@ lock_t *create_lock(int64_t table_id, int64_t record_id, int slotnum,
 void destroy_lock(lock_t *lock) {
   if (lock == NULL) return;
   if (pthread_cond_destroy(&lock->cond)) {
-    LOG_ERR("failed to destroy condition variable");
+    LOG_ERR(6, "failed to destroy condition variable");
     return;
   }
   free(lock);
@@ -470,7 +470,7 @@ void destroy_lock(lock_t *lock) {
 
 int push_into_lock_list(lock_list_t &lock_list, lock_t *lock) {
   if (lock == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(6, "invalid parameters");
     return 1;
   }
   lock->sentinel = &lock_list;
@@ -480,7 +480,7 @@ int push_into_lock_list(lock_list_t &lock_list, lock_t *lock) {
     lock->prev = NULL;
   } else {
     if (lock_list.head == NULL || lock_list.tail == NULL) {
-      LOG_ERR("invalid lock list: just one of the head and tail is NULL");
+      LOG_ERR(6, "invalid lock list: just one of the head and tail is NULL");
       return 1;
     }
     lock_list.tail->next = lock;
@@ -492,7 +492,7 @@ int push_into_lock_list(lock_list_t &lock_list, lock_t *lock) {
 
 int remove_from_lock_list(lock_t *lock) {
   if (lock == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(6, "invalid parameters");
     return 1;
   }
   auto *sentinel = lock->sentinel;
@@ -528,7 +528,7 @@ int free_lock_table() {
     if (trx_abort(trx_id) != trx_id) {
       pthread_mutex_unlock(&trx_table_latch);
       pthread_mutex_unlock(&lock_table_latch);
-      LOG_ERR("failed to abort the trx %d", trx_id);
+      LOG_ERR(6, "failed to abort the trx %d", trx_id);
       return 1;
     }
   }
@@ -542,7 +542,7 @@ int free_lock_table() {
       auto *tmp = lock;
       lock = lock->next;
       if (pthread_cond_destroy(&tmp->cond)) {
-        LOG_ERR("failed to destroy condition variable!");
+        LOG_ERR(6, "failed to destroy condition variable!");
         return 1;
       }
       free(tmp);
@@ -602,7 +602,7 @@ int convert_implicit_lock(bpt_page_t *page, int table_id, pagenum_t page_id,
           iter = iter->trx_next_lock;
         }
         if (iter == NULL) {
-          LOG_ERR("failed to find dummy lock");
+          LOG_ERR(6, "failed to find dummy lock");
           pthread_mutex_unlock(&trx_table_latch);
           pthread_mutex_unlock(&lock_table_latch);
           return 1;
@@ -617,7 +617,7 @@ int convert_implicit_lock(bpt_page_t *page, int table_id, pagenum_t page_id,
         if (push_into_lock_list(lock_list, iter)) {
           pthread_mutex_unlock(&trx_table_latch);
           pthread_mutex_unlock(&lock_table_latch);
-          LOG_ERR("failed to push into the lock list");
+          LOG_ERR(6, "failed to push into the lock list");
           return 1;
         }
 
@@ -673,7 +673,7 @@ lock_t *try_implicit_lock(bpt_page_t *page, int64_t table_id, pagenum_t page_id,
   if (!is_trx_assigned(trx_id)) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("there is no transaction with id = %d", trx_id);
+    LOG_ERR(6, "there is no transaction with id = %d", trx_id);
     return NULL;
   }
   auto *trx = trx_table[trx_id];
@@ -687,7 +687,7 @@ lock_t *try_implicit_lock(bpt_page_t *page, int64_t table_id, pagenum_t page_id,
   if (slotnum >= num_of_keys || slots[slotnum].key != key) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("invalid slotnum");
+    LOG_ERR(6, "invalid slotnum");
     return NULL;
   }
 
@@ -699,7 +699,7 @@ lock_t *try_implicit_lock(bpt_page_t *page, int64_t table_id, pagenum_t page_id,
   if (new_lock == NULL) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to create a new lock");
+    LOG_ERR(6, "failed to create a new lock");
     return NULL;
   }
   // insert dummy lock into dummy lock list
@@ -723,7 +723,7 @@ lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
   if (convert_implicit_lock(*page_ptr, table_id, page_id, key, trx_id,
                             &slotnum)) {
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to convert implicit lock into explicit lock");
+    LOG_ERR(6, "failed to convert implicit lock into explicit lock");
     return NULL;
   }
 
@@ -763,7 +763,7 @@ lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
   new_lock->sentinel = &lock_list;
   if (new_lock == NULL) {
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to create a new lock");
+    LOG_ERR(6, "failed to create a new lock");
     return NULL;
   }
   pthread_mutex_lock(&trx_table_latch);
@@ -817,7 +817,7 @@ lock_t *lock_acquire(bpt_page_t **page_ptr, int64_t table_id, pagenum_t page_id,
   if (push_into_lock_list(lock_list, new_lock)) {
     pthread_mutex_unlock(&lock_table_latch);
     destroy_lock(new_lock);
-    LOG_ERR("failed to push into the lock list");
+    LOG_ERR(6, "failed to push into the lock list");
     return NULL;
   }
 
@@ -875,7 +875,7 @@ int __lock_release(lock_t *lock_obj) {
 
 int lock_release(lock_t *lock_obj) {
   if (lock_obj == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(6, "invalid parameters");
     return 1;
   }
 
@@ -886,7 +886,7 @@ int lock_release(lock_t *lock_obj) {
   pthread_mutex_lock(&lock_table_latch);
   if (__lock_release(lock_obj)) {
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR("failed to release lock");
+    LOG_ERR(6, "failed to release lock");
     return 1;
   }
   pthread_mutex_unlock(&lock_table_latch);
@@ -907,7 +907,7 @@ trx_t *get_trx(lock_t *lock) {
 
 int is_conflicting(lock_t *a, lock_t *b) {
   if (a == NULL || b == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(6, "invalid parameters");
     return false;
   }
 
@@ -926,7 +926,7 @@ int is_conflicting(lock_t *a, lock_t *b) {
 
 lock_t *find_conflicting_lock(lock_t *lock) {
   if (lock == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(6, "invalid parameters");
     return NULL;
   }
   if (lock->sentinel == NULL) {
@@ -983,7 +983,7 @@ int is_deadlock(trx_t *checking_trx, trx_t *target_trx) {
 
 int is_deadlock(lock_t *lock) {
   if (lock == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(6, "invalid parameters");
     return false;
   }
   if (lock->sentinel == NULL || lock->owner_trx == NULL) {
@@ -1023,13 +1023,13 @@ void set_trx_counter(trx_id_t val) {
 int add_active_trx(trx_id_t trx_id) {
   pthread_mutex_lock(&trx_table_latch);
   if (is_trx_assigned(trx_id)) {
-    LOG_ERR("%d already exists in trx_table", trx_id);
+    LOG_ERR(4, "%d already exists in trx_table", trx_id);
     return 1;
   }
   trx_t *new_trx = (trx_t *)malloc(sizeof(trx_t));
   if (new_trx == NULL) {
     pthread_mutex_unlock(&trx_table_latch);
-    LOG_ERR("failed to allocate new transaction object");
+    LOG_ERR(4, "failed to allocate new transaction object");
     return 1;
   }
   new_trx->id = trx_id;
@@ -1045,7 +1045,7 @@ int add_active_trx(trx_id_t trx_id) {
   if (!res.second) {
     free(new_trx);
     pthread_mutex_unlock(&trx_table_latch);
-    LOG_ERR("insertion failed");
+    LOG_ERR(4, "insertion failed");
     return 1;
   }
   pthread_mutex_unlock(&trx_table_latch);
@@ -1055,7 +1055,7 @@ int add_active_trx(trx_id_t trx_id) {
 int remove_active_trx(trx_id_t trx_id) {
   pthread_mutex_lock(&trx_table_latch);
   if (!is_trx_assigned(trx_id)) {
-    LOG_ERR("there is no trx %d", trx_id);
+    LOG_ERR(4, "there is no trx %d", trx_id);
     return 1;
   }
   auto *trx = trx_table[trx_id];

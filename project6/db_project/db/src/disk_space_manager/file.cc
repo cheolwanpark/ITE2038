@@ -22,16 +22,16 @@ pagenum_t offset2pagenum(uint64_t offset) { return offset / kPageSize; }
 // to preserve interface , Disk Space Manager uses this functions internally
 void __file_read_page(int64_t table_id, pagenum_t pagenum, page_t* dest) {
   if (table_id < 0 || dest == NULL) {
-    LOG_ERR("invalid parameters", pagenum);
+    LOG_ERR(1, "invalid parameters", pagenum);
     return;
   }
   table_id = table_id_map[table_id];
   if (lseek(table_id, pagenum2offset(pagenum), SEEK_SET) < 0) {
-    LOG_ERR("cannot seek page %llu", pagenum);
+    LOG_ERR(1, "cannot seek page %llu", pagenum);
     return;
   }
   if (read(table_id, dest, sizeof(page_t)) < 0) {
-    LOG_ERR("cannot read page %llu, errno: %s", pagenum, strerror(errno));
+    LOG_ERR(1, "cannot read page %llu, errno: %s", pagenum, strerror(errno));
     return;
   }
 }
@@ -39,68 +39,69 @@ void __file_read_page(int64_t table_id, pagenum_t pagenum, page_t* dest) {
 void __file_write_page(int64_t table_id, pagenum_t pagenum, const page_t* src,
                        int sync = true) {
   if (table_id < 0 || src == NULL) {
-    LOG_ERR("invalid parameters", pagenum);
+    LOG_ERR(1, "invalid parameters", pagenum);
     return;
   }
   table_id = table_id_map[table_id];
   if (lseek(table_id, pagenum2offset(pagenum), SEEK_SET) < 0) {
-    LOG_ERR("cannot seek page %llu", pagenum);
+    LOG_ERR(1, "cannot seek page %llu", pagenum);
     return;
   }
   if (write(table_id, src, sizeof(page_t)) < 0) {
-    LOG_ERR("cannot write page %llu", pagenum);
+    LOG_ERR(1, "cannot write page %llu", pagenum);
     return;
   }
   if (sync && fsync(table_id) < 0) {
-    LOG_ERR("cannot sync write page %llu, errno: %s", pagenum, strerror(errno));
+    LOG_ERR(1, "cannot sync write page %llu, errno: %s", pagenum,
+            strerror(errno));
   }
 }
 
 void __file_read_header_page(int64_t table_id, header_page_t* dest) {
   if (table_id < 0 || dest == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(1, "invalid parameters");
     return;
   }
   table_id = table_id_map[table_id];
   if (lseek(table_id, pagenum2offset(kHeaderPagenum), SEEK_SET) < 0) {
-    LOG_ERR("cannot seek header page");
+    LOG_ERR(1, "cannot seek header page");
     return;
   }
   if (read(table_id, dest, sizeof(header_page_t)) < 0) {
-    LOG_ERR("cannot read header page");
+    LOG_ERR(1, "cannot read header page");
     return;
   }
 }
 
 void __file_write_header_page(int64_t table_id, const header_page_t* src) {
   if (table_id < 0 || src == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(1, "invalid parameters");
     return;
   }
   table_id = table_id_map[table_id];
   if (lseek(table_id, pagenum2offset(kHeaderPagenum), SEEK_SET) < 0) {
-    LOG_ERR("cannot seek header page");
+    LOG_ERR(1, "cannot seek header page");
     return;
   }
   if (write(table_id, src, sizeof(header_page_t)) < 0) {
-    LOG_ERR("cannot write header page");
+    LOG_ERR(1, "cannot write header page");
     return;
   }
   if (fsync(table_id) < 0) {
-    LOG_ERR("cannot sync write header page, errno: %s", strerror(errno));
+    LOG_ERR(1, "cannot sync write header page, errno: %s", strerror(errno));
     return;
   }
 }
 
 uint64_t __file_size(int64_t table_id) {
   if (table_id < 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(1, "invalid parameters");
     return 0;
   }
   table_id = table_id_map[table_id];
   auto size = lseek(table_id, 0, SEEK_END);
   if (size < 0) {
-    LOG_ERR("cannot seek file end position");
+    LOG_ERR(1, "cannot seek file end position");
     return 0;
   }
   return size;
@@ -112,12 +113,12 @@ void expand(int64_t table_id, uint64_t size) {
   if (size < 1LLU) return;
   table_id = table_id_map[table_id];
   if (lseek(table_id, size - 1, SEEK_END) < 0) {
-    LOG_ERR("cannot seek file");
+    LOG_ERR(1, "cannot seek file");
     return;
   }
   byte null_byte = 0;
   if (write(table_id, &null_byte, 1) < 0) {
-    LOG_ERR("cannot write null byte to expand file");
+    LOG_ERR(1, "cannot write null byte to expand file");
     return;
   }
   if (lseek(table_id, 0, SEEK_SET) < 0) {
@@ -125,7 +126,7 @@ void expand(int64_t table_id, uint64_t size) {
     return;
   }
   if (fsync(table_id) < 0) {
-    LOG_ERR("cannot sync file after expand, errno: %s", strerror(errno));
+    LOG_ERR(1, "cannot sync file after expand, errno: %s", strerror(errno));
     return;
   }
 }
@@ -134,11 +135,11 @@ void expand(int64_t table_id, uint64_t size) {
 void expand_and_create_pages(int64_t table_id, uint64_t size, pagenum_t* first,
                              pagenum_t* last, uint64_t* num_new_pages) {
   if (table_id < 0 || size % kPageSize != 0 || size < 1LLU) {
-    LOG_ERR("cannot expand database file, wrong parameter");
+    LOG_ERR(1, "cannot expand database file, wrong parameter");
     return;
   }
   if (first == NULL || last == NULL || num_new_pages == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(1, "invalid parameters");
     return;
   }
 
@@ -168,7 +169,7 @@ void expand_and_create_pages(int64_t table_id, uint64_t size, pagenum_t* first,
 // Expand file by size and create page list and connect it to header
 void expand_and_create_pages(int64_t table_id, uint64_t size) {
   if (table_id < 0 || size % kPageSize != 0 || size < 1LLU) {
-    LOG_ERR("cannot expand database file, wrong parameter");
+    LOG_ERR(1, "cannot expand database file, wrong parameter");
     return;
   }
 
@@ -197,7 +198,7 @@ void expand_and_create_pages(int64_t table_id, uint64_t size) {
 // Open existing database file or create one if not existed.
 int64_t file_open_table_file(const char* pathname) {
   if (pathname == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(1, "invalid parameters");
     return -1;
   }
 
@@ -211,13 +212,13 @@ int64_t file_open_table_file(const char* pathname) {
   int table_id = 0;
   int64_t target_table_id = 0;
   if (sscanf(pathname, "DATA%lld", &target_table_id) != 1) {
-    LOG_ERR("invalid pathname");
+    LOG_ERR(1, "invalid pathname");
     return -1;
   }
   if (access(pathname, F_OK) != 0) {
     table_id = open(pathname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (table_id < 0) {
-      LOG_ERR("failed to create and open %s, errno: %s", pathname,
+      LOG_ERR(1, "failed to create and open %s, errno: %s", pathname,
               strerror(errno));
       return table_id;
     }
@@ -237,7 +238,7 @@ int64_t file_open_table_file(const char* pathname) {
   } else {
     table_id = open(pathname, O_RDWR);
     if (table_id < 0) {
-      LOG_ERR("failed to open %s, errno: %s", pathname, strerror(errno));
+      LOG_ERR(1, "failed to open %s, errno: %s", pathname, strerror(errno));
       return table_id;
     }
     table_id_map[target_table_id] = table_id;
@@ -263,7 +264,7 @@ int64_t file_open_table_file(int64_t table_id) {
 int file_expand_twice(int64_t table_id, pagenum_t* start, pagenum_t* end,
                       uint64_t* num_new_pages) {
   if (table_id < 0) {
-    LOG_ERR("file descriptor cannot be a negative value");
+    LOG_ERR(1, "file descriptor cannot be a negative value");
     return 1;
   }
   expand_and_create_pages(table_id, __file_size(table_id), start, end,
@@ -274,7 +275,7 @@ int file_expand_twice(int64_t table_id, pagenum_t* start, pagenum_t* end,
 // Allocate an on-disk page from the free page list
 pagenum_t file_alloc_page(int64_t table_id) {
   if (table_id < 0) {
-    LOG_ERR("file descriptor cannot be a negative value");
+    LOG_ERR(1, "file descriptor cannot be a negative value");
     return 0;
   }
 
@@ -287,7 +288,7 @@ pagenum_t file_alloc_page(int64_t table_id) {
 
   auto pagenum = header_page.header.first_free_page;
   if (pagenum == 0) {
-    LOG_ERR("expand database file failed due to some reason");
+    LOG_ERR(1, "expand database file failed due to some reason");
     return 0;
   }
 
@@ -302,7 +303,7 @@ pagenum_t file_alloc_page(int64_t table_id) {
 // Free an on-disk page to the free page list
 void file_free_page(int64_t table_id, pagenum_t pagenum) {
   if (table_id < 0 || pagenum < 1) {
-    LOG_ERR("cannot free the page, wrong parameter");
+    LOG_ERR(1, "cannot free the page, wrong parameter");
     return;
   }
   header_page_t header_page;

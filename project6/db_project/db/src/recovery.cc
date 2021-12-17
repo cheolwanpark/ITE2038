@@ -75,25 +75,25 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
   log_record_t *rec =
       (log_record_t *)malloc(sizeof(log_record_t) + 108 * 2 + 8);
   if (rec == NULL) {
-    LOG_ERR("failed to allocate record struct, %s", strerror(errno));
+    LOG_ERR(4, "failed to allocate record struct, %s", strerror(errno));
     return 1;
   }
 
   if (fprintf(logmsg_fp, "[ANALYSIS] Analysis pass start\n") < 0) {
-    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
 
   while (true) {
     if (lseek(log_fd, current_position, SEEK_SET) < 0) {
-      LOG_ERR("failed to seek, %s", strerror(errno));
+      LOG_ERR(4, "failed to seek, %s", strerror(errno));
       return 1;
     }
     if (read(log_fd, &log_size, sizeof(log_size)) != sizeof(log_size) ||
         log_size == 0)
       break;
     if (lseek(log_fd, -4, SEEK_CUR) < 0) {
-      LOG_ERR("failed to seek, %s", strerror(errno));
+      LOG_ERR(4, "failed to seek, %s", strerror(errno));
       return 1;
     }
 
@@ -103,7 +103,7 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
     switch (rec->type) {
       case BEGIN_LOG:
         if (!losers.insert(rec->trx_id).second) {
-          LOG_ERR("%d already exists in losers", rec->trx_id);
+          LOG_ERR(4, "%d already exists in losers", rec->trx_id);
           return 1;
         }
         break;
@@ -111,11 +111,11 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
       case COMMIT_LOG:
       case ROLLBACK_LOG:
         if (losers.erase(rec->trx_id) == 0) {
-          LOG_ERR("%d is not in the losers", rec->trx_id);
+          LOG_ERR(4, "%d is not in the losers", rec->trx_id);
           return 1;
         }
         if (!winners.insert(rec->trx_id).second) {
-          LOG_ERR("%d already exists in winners", rec->trx_id);
+          LOG_ERR(4, "%d already exists in winners", rec->trx_id);
           return 1;
         }
         break;
@@ -127,33 +127,33 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
   LSN = current_lsn + 1;
 
   if (fprintf(logmsg_fp, "[ANALYSIS] Analysis success. Winner:") < 0) {
-    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
   for (auto id : winners) {
     if (fprintf(logmsg_fp, " %d", id) < 0) {
-      LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+      LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
       return 1;
     }
     max_trx_id = std::max(id, max_trx_id);
   }
   if (fprintf(logmsg_fp, ", Loser:") < 0) {
-    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
   for (auto id : losers) {
     if (fprintf(logmsg_fp, " %d", id) < 0) {
-      LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+      LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
       return 1;
     }
     max_trx_id = std::max(id, max_trx_id);
   }
   if (fprintf(logmsg_fp, "\n") < 0) {
-    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
   if (fflush(logmsg_fp) != 0) {
-    LOG_ERR("failed to flush logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
     return 1;
   }
 
@@ -170,7 +170,7 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
   // add losers as a active trx
   for (auto id : losers) {
     if (add_active_trx(id)) {
-      LOG_ERR("failed to add %d as a active trx", id);
+      LOG_ERR(4, "failed to add %d as a active trx", id);
       return 1;
     }
   }
@@ -179,25 +179,25 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
   log_record_t *rec =
       (log_record_t *)malloc(sizeof(log_record_t) + 108 * 2 + 8);
   if (rec == NULL) {
-    LOG_ERR("failed to allocate record struct, %s", strerror(errno));
+    LOG_ERR(4, "failed to allocate record struct, %s", strerror(errno));
     return 1;
   }
 
   if (fprintf(logmsg_fp, "[REDO] Redo pass start\n") < 0) {
-    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
 
   while (true) {
     if (lseek(log_fd, current_position, SEEK_SET) < 0) {
-      LOG_ERR("failed to seek, %s", strerror(errno));
+      LOG_ERR(4, "failed to seek, %s", strerror(errno));
       return 1;
     }
     if (read(log_fd, &log_size, sizeof(log_size)) != sizeof(log_size) ||
         log_size == 0)
       break;
     if (lseek(log_fd, -4, SEEK_CUR) < 0) {
-      LOG_ERR("failed to seek, %s", strerror(errno));
+      LOG_ERR(4, "failed to seek, %s", strerror(errno));
       return 1;
     }
 
@@ -209,7 +209,7 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
       case BEGIN_LOG:
         if (fprintf(logmsg_fp, "LSN %llu [BEGIN] Transaction id %d\n", rec->lsn,
                     rec->trx_id) < 0) {
-          LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+          LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
           return 1;
         }
         break;
@@ -217,7 +217,7 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
       case COMMIT_LOG:
         if (fprintf(logmsg_fp, "LSN %llu [COMMIT] Transaction id %d\n",
                     rec->lsn, rec->trx_id) < 0) {
-          LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+          LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
           return 1;
         }
         break;
@@ -225,7 +225,7 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
       case ROLLBACK_LOG:
         if (fprintf(logmsg_fp, "LSN %llu [ROLLBACK] Transaction id %d\n",
                     rec->lsn, rec->trx_id) < 0) {
-          LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+          LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
           return 1;
         }
         break;
@@ -233,7 +233,7 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
       case UPDATE_LOG:
       case COMPENSATE_LOG:
         if (file_open_table_file(rec->table_id) < 0) {
-          LOG_ERR("failed to open table file");
+          LOG_ERR(4, "failed to open table file");
           return 1;
         }
         auto *page =
@@ -249,14 +249,16 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
                         "LSN %llu [UPDATE] Transaction id %d redo apply\n",
                         rec->lsn, rec->trx_id) < 0) {
               unpin(page);
-              LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+              LOG_ERR(4, "failed to write into logmsg file, %s",
+                      strerror(errno));
               return 1;
             }
           } else {
             if (fprintf(logmsg_fp, "LSN %llu [CLR] next undo lsn %llu\n",
                         rec->lsn, get_next_undo_lsn(rec)) < 0) {
               unpin(page);
-              LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+              LOG_ERR(4, "failed to write into logmsg file, %s",
+                      strerror(errno));
               return 1;
             }
           }
@@ -264,7 +266,7 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
           if (fprintf(logmsg_fp, "LSN %llu [CONSIDER-REDO] Transaction id %d\n",
                       rec->lsn, rec->trx_id) < 0) {
             unpin(page);
-            LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+            LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
             return 1;
           }
         }
@@ -277,7 +279,7 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
       lsn_position_map[rec->lsn] = current_position;
       auto *trx = get_trx(rec->trx_id);
       if (trx == NULL) {
-        LOG_ERR("loser trx %d is not in the active trx table");
+        LOG_ERR(4, "loser trx %d is not in the active trx table");
         return 1;
       }
       trx->last_lsn = rec->lsn;
@@ -288,11 +290,11 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
   free(rec);
 
   if (fprintf(logmsg_fp, "[REDO] Redo pass end\n") < 0) {
-    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
   if (fflush(logmsg_fp) != 0) {
-    LOG_ERR("failed to flush logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
     return 1;
   }
 
@@ -307,12 +309,12 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
   log_record_t *rec =
       (log_record_t *)malloc(sizeof(log_record_t) + 108 * 2 + 8);
   if (rec == NULL) {
-    LOG_ERR("failed to allocate record struct, %s", strerror(errno));
+    LOG_ERR(4, "failed to allocate record struct, %s", strerror(errno));
     return 1;
   }
 
   if (fprintf(logmsg_fp, "[UNDO] Undo pass start\n") < 0) {
-    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
 
@@ -326,14 +328,14 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
     auto position = it->second;
 
     if (lseek(log_fd, position, SEEK_SET) < 0) {
-      LOG_ERR("failed to seek, %s", strerror(errno));
+      LOG_ERR(4, "failed to seek, %s", strerror(errno));
       return 1;
     }
     if (read(log_fd, &log_size, sizeof(log_size)) != sizeof(log_size) ||
         log_size == 0)
       break;
     if (lseek(log_fd, -4, SEEK_CUR) < 0) {
-      LOG_ERR("failed to seek, %s", strerror(errno));
+      LOG_ERR(4, "failed to seek, %s", strerror(errno));
       return 1;
     }
     if (read(log_fd, rec, log_size) != log_size) break;
@@ -341,24 +343,24 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
     if (rec->type == BEGIN_LOG) {
       auto *trx = get_trx(rec->trx_id);
       if (trx == NULL) {
-        LOG_ERR("failed to get loser trx %d", rec->trx_id);
+        LOG_ERR(4, "failed to get loser trx %d", rec->trx_id);
         return 1;
       }
       auto *rec = create_log(trx, ROLLBACK_LOG);
       if (rec == NULL) {
-        LOG_ERR("failed to create log");
+        LOG_ERR(4, "failed to create log");
         return 0;
       }
       if (push_into_log_buffer(rec)) {
         free(rec);
-        LOG_ERR("failed to push into log buffer");
+        LOG_ERR(4, "failed to push into log buffer");
         return 0;
       }
       free(rec);
 
       losers.erase(rec->trx_id);
       if (remove_active_trx(rec->trx_id)) {
-        LOG_ERR("failed to remove from active trx table");
+        LOG_ERR(4, "failed to remove from active trx table");
         return 1;
       }
     }
@@ -370,14 +372,14 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
     } else if (rec->type == UPDATE_LOG) {
       auto *trx = get_trx(rec->trx_id);
       if (trx == NULL) {
-        LOG_ERR("failed to get loser trx %d", rec->trx_id);
+        LOG_ERR(4, "failed to get loser trx %d", rec->trx_id);
         return 1;
       }
       auto *new_rec = create_log_compensate(trx, rec->table_id, rec->page_num,
                                             rec->offset, rec->len, get_new(rec),
                                             get_old(rec), rec->prev_lsn);
       if (new_rec == NULL) {
-        LOG_ERR("failed to create new compensate log");
+        LOG_ERR(4, "failed to create new compensate log");
         return 0;
       }
 
@@ -387,7 +389,7 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
       set_dirty(page);
       if (push_into_log_buffer(new_rec)) {
         free(new_rec);
-        LOG_ERR("failed to push log into log buffer");
+        LOG_ERR(4, "failed to push log into log buffer");
         return 0;
       }
       page->header.page_lsn = new_rec->lsn;
@@ -397,7 +399,7 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
 
       if (fprintf(logmsg_fp, "LSN %llu [UPDATE] Transaction id %d undo apply\n",
                   rec->lsn, rec->trx_id) < 0) {
-        LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+        LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
         return 1;
       }
     }
@@ -405,11 +407,11 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
   free(rec);
 
   if (fprintf(logmsg_fp, "[UNDO] Undo pass end\n") < 0) {
-    LOG_ERR("failed to write into logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
   if (fflush(logmsg_fp) != 0) {
-    LOG_ERR("failed to flush logmsg file, %s", strerror(errno));
+    LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
     return 1;
   }
 
@@ -421,15 +423,15 @@ int recovery_process() {
   std::map<uint64_t, uint64_t> lsn_position_map;
   pthread_mutex_lock(&log_latch);
   if (analysis_phase(winners, losers)) {
-    LOG_ERR("failed to perform an alysis!");
+    LOG_ERR(4, "failed to perform an alysis!");
     return 1;
   }
   if (redo_phase(winners, losers, lsn_position_map)) {
-    LOG_ERR("failed to perform redo!");
+    LOG_ERR(4, "failed to perform redo!");
     return 1;
   }
   if (undo_phase(winners, losers, lsn_position_map)) {
-    LOG_ERR("failed to perform undo!");
+    LOG_ERR(4, "failed to perform undo!");
     return 1;
   }
   pthread_mutex_unlock(&log_latch);
@@ -441,14 +443,14 @@ int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
   // allocate log buffer
   log_buffer = (byte *)malloc(log_buffer_max_size);
   if (log_buffer == NULL) {
-    LOG_ERR("failed to allocate log buffer");
+    LOG_ERR(5, "failed to allocate log buffer");
     return 1;
   }
 
   // open logmsg file
   logmsg_fp = fopen(logmsg_path, "a+");
   if (logmsg_fp == NULL) {
-    LOG_ERR("failed to open or create %s, errno: %s", logmsg_path,
+    LOG_ERR(5, "failed to open or create %s, errno: %s", logmsg_path,
             strerror(errno));
     return 1;
   }
@@ -457,7 +459,7 @@ int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
   if (access(log_path, F_OK) != 0) {
     log_fd = open(log_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (log_fd < 0) {
-      LOG_ERR("failed to create and open log file %s, errno: %s", log_path,
+      LOG_ERR(5, "failed to create and open log file %s, errno: %s", log_path,
               strerror(errno));
       return 1;
     }
@@ -465,24 +467,24 @@ int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
     // write guard log_size (for reading)
     uint32_t guard = 0;
     if (write(log_fd, &guard, sizeof(guard)) != sizeof(guard)) {
-      LOG_ERR("cannot write log, errno: %s", strerror(errno));
+      LOG_ERR(5, "cannot write log, errno: %s", strerror(errno));
       return 1;
     }
     if (fsync(log_fd) < 0) {
-      LOG_ERR("cannot sync log file, errno: %s", strerror(errno));
+      LOG_ERR(5, "cannot sync log file, errno: %s", strerror(errno));
       return 1;
     }
 
   } else {
     log_fd = open(log_path, O_RDWR);
     if (log_fd < 0) {
-      LOG_ERR("failed to open log file %s, errno: %s", log_path,
+      LOG_ERR(5, "failed to open log file %s, errno: %s", log_path,
               strerror(errno));
       return 1;
     }
 
     if (recovery_process()) {
-      LOG_ERR("failed to recovery!");
+      LOG_ERR(4, "failed to recovery!");
       return 1;
     }
   }
@@ -504,12 +506,12 @@ void free_recovery() {
 log_record_t *create_log(trx_t *trx, int32_t type) {
   if (trx == NULL ||
       (type != BEGIN_LOG && type != COMMIT_LOG && type != ROLLBACK_LOG)) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(5, "invalid parameters");
     return NULL;
   }
   log_record_t *rec = (log_record_t *)malloc(sizeof(log_record_t));
   if (rec == NULL) {
-    LOG_ERR("failed to allocate");
+    LOG_ERR(5, "failed to allocate");
     return NULL;
   }
   rec->log_size = 28;
@@ -527,13 +529,13 @@ log_record_t *create_log_update(trx_t *trx, int64_t table_id, pagenum_t page_id,
                                 uint16_t offset, uint16_t len, byte *old_img,
                                 byte *new_img) {
   if (trx == NULL || old_img == NULL || new_img == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(5, "invalid parameters");
     return NULL;
   }
 
   log_record_t *rec = (log_record_t *)malloc(sizeof(log_record_t) + 2 * len);
   if (rec == NULL) {
-    LOG_ERR("failed to allocate");
+    LOG_ERR(5, "failed to allocate");
     return NULL;
   }
   auto lsn = LSN++;
@@ -559,7 +561,7 @@ log_record_t *create_log_compensate(trx_t *trx, int64_t table_id,
                                     uint16_t len, byte *old_img, byte *new_img,
                                     uint64_t next_undo_seq) {
   if (trx == NULL || old_img == NULL || new_img == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(5, "invalid parameters");
     return NULL;
   }
   auto lsn = LSN++;
@@ -567,7 +569,7 @@ log_record_t *create_log_compensate(trx_t *trx, int64_t table_id,
   log_record_t *rec =
       (log_record_t *)malloc(sizeof(log_record_t) + 2 * len + 8);
   if (rec == NULL) {
-    LOG_ERR("failed to allocate");
+    LOG_ERR(5, "failed to allocate");
     return NULL;
   }
   rec->log_size = sizeof(log_record_t) + 2 * len + 8;
@@ -608,26 +610,26 @@ int flush_log() {
 
   if (lseek(log_fd, -sizeof(uint32_t), SEEK_END) <
       0) {  // go to flush start position
-    LOG_ERR("failed to seek on log, errno: %s", strerror(errno));
+    LOG_ERR(5, "failed to seek on log, errno: %s", strerror(errno));
     return 1;
   }
 
   if (write(log_fd, log_buffer, log_buffer_size) != log_buffer_size) {
-    LOG_ERR("cannot flush log, errno: %s", strerror(errno));
+    LOG_ERR(5, "cannot flush log, errno: %s", strerror(errno));
     return 1;
   }
   if (fsync(log_fd) < 0) {
-    LOG_ERR("cannot sync log file, errno: %s", strerror(errno));
+    LOG_ERR(5, "cannot sync log file, errno: %s", strerror(errno));
     return 1;
   }
   // write guard log_size (for reading)
   uint32_t guard = 0;
   if (write(log_fd, &guard, sizeof(guard)) != sizeof(guard)) {
-    LOG_ERR("cannot write log, errno: %s", strerror(errno));
+    LOG_ERR(5, "cannot write log, errno: %s", strerror(errno));
     return 1;
   }
   if (fsync(log_fd) < 0) {
-    LOG_ERR("cannot sync log file, errno: %s", strerror(errno));
+    LOG_ERR(5, "cannot sync log file, errno: %s", strerror(errno));
     return 1;
   }
   log_buffer_size = 0;
@@ -640,23 +642,23 @@ void descript_log_file(int n) {
   log_record_t *rec = NULL;
 
   if (lseek(log_fd, 0, SEEK_SET) < 0) {
-    LOG_ERR("failed to seek, %s", strerror(errno));
+    LOG_ERR(5, "failed to seek, %s", strerror(errno));
     return;
   }
 
   while (n-- && read(log_fd, &log_size, 4) == 4 && log_size != 0) {
     if (lseek(log_fd, -4, SEEK_CUR) < 0) {
-      LOG_ERR("failed to seek");
+      LOG_ERR(5, "failed to seek");
       return;
     }
     rec = (log_record_t *)malloc(log_size);
     if (rec == NULL) {
-      LOG_ERR("failed to allocate log record struct");
+      LOG_ERR(5, "failed to allocate log record struct");
       return;
     }
     auto read_res = read(log_fd, rec, log_size);
     if (read_res < 0) {
-      LOG_ERR("failed to read, %s", strerror(errno));
+      LOG_ERR(5, "failed to read, %s", strerror(errno));
       return;
     } else if (read_res == 0)
       break;

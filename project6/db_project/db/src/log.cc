@@ -21,7 +21,7 @@ void GPRINTF(const char *format, ...) {
 #endif
 }
 
-void __log(bool force_exit, const char *severity, const char *function_name,
+void __log(int exitcode, const char *severity, const char *function_name,
            int line, const char *format, ...) {
 #ifdef THREAD_ALIGN
   pthread_mutex_lock(&debug_log_latch);
@@ -35,7 +35,7 @@ void __log(bool force_exit, const char *severity, const char *function_name,
 #ifdef THREAD_ALIGN
   pthread_mutex_unlock(&debug_log_latch);
 #endif
-  if (force_exit) {
-    exit(-1);
+  if (exitcode) {
+    exit(exitcode);
   }
 }

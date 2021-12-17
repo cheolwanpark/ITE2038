@@ -71,7 +71,7 @@ int single_thread() {
   for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
     for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
       if (db_insert(table_id[tid], rid, acc.data, sizeof(acc))) {
-        LOG_ERR("failed to insert!");
+        LOG_ERR(-1, "failed to insert!");
         return -1;
       }
     }
@@ -101,53 +101,53 @@ int single_thread() {
     uint16_t size;
 
     if (db_find(src_table_id, src_record_id, acc1.data, &size, trx)) {
-      LOG_ERR("find failed!");
+      LOG_ERR(-1, "find failed!");
       return -1;
     }
     if (size != sizeof(acc1)) {
-      LOG_ERR("invalid result!");
+      LOG_ERR(-1, "invalid result!");
       return -1;
     }
 
     acc1.money -= money_transferred;
     if (db_update(src_table_id, src_record_id, acc1.data, sizeof(acc1), &size,
                   trx)) {
-      LOG_ERR("update failed!");
+      LOG_ERR(-1, "update failed!");
       return -1;
     }
     if (size != sizeof(acc1)) {
-      LOG_ERR("invalid result!");
+      LOG_ERR(-1, "invalid result!");
       return -1;
     }
 
     if (db_find(dest_table_id, dest_record_id, acc2.data, &size, trx)) {
-      LOG_ERR("find failed!");
+      LOG_ERR(-1, "find failed!");
       return -1;
     }
     if (size != sizeof(acc2)) {
-      LOG_ERR("invalid result!");
+      LOG_ERR(-1, "invalid result!");
       return -1;
     }
 
     acc2.money += money_transferred;
     if (db_update(dest_table_id, dest_record_id, acc2.data, sizeof(acc2), &size,
                   trx)) {
-      LOG_ERR("update failed!");
+      LOG_ERR(-1, "update failed!");
       return -1;
     }
     if (size != sizeof(acc2)) {
-      LOG_ERR("invalid result!");
+      LOG_ERR(-1, "invalid result!");
       return -1;
     }
 
     if (rand() % 2) {
       if (trx_commit(trx) != trx) {
-        LOG_ERR("commit failed!");
+        LOG_ERR(-1, "commit failed!");
         return -1;
       }
     } else {
       if (trx_abort(trx) != trx) {
-        LOG_ERR("abort failed!");
+        LOG_ERR(-1, "abort failed!");
         return -1;
       }
     }
@@ -166,18 +166,18 @@ int single_thread() {
         account_t acc;
         uint16_t size;
         if (db_find(table_id[tid], rid, acc.data, &size, trx)) {
-          LOG_ERR("find failed!");
+          LOG_ERR(-1, "find failed!");
           return -1;
         }
         sum_money += acc.money;
       }
     }
     if (trx_commit(trx) != trx) {
-      LOG_ERR("commit failed");
+      LOG_ERR(-1, "commit failed");
       return -1;
     }
     if (sum_money != SUM_MONEY) {
-      LOG_ERR("inconsistent state is detected!");
+      LOG_ERR(-1, "inconsistent state is detected!");
       return -1;
     }
     if ((scan + 1) % 100 == 0) LOG_INFO("%dth scan done", scan + 1);
@@ -222,7 +222,7 @@ void *transfer_thread_func(void *arg) {
 
     if (db_find(src_table_id, src_record_id, acc1.data, &size, trx)) continue;
     if (size != sizeof(acc1)) {
-      LOG_ERR("invalid result!");
+      LOG_ERR(-1, "invalid result!");
       return NULL;
     }
 
@@ -231,13 +231,13 @@ void *transfer_thread_func(void *arg) {
                   trx))
       continue;
     if (size != sizeof(acc1)) {
-      LOG_ERR("invalid result!");
+      LOG_ERR(-1, "invalid result!");
       return NULL;
     }
 
     if (db_find(dest_table_id, dest_record_id, acc2.data, &size, trx)) continue;
     if (size != sizeof(acc2)) {
-      LOG_ERR("invalid result!");
+      LOG_ERR(-1, "invalid result!");
       return NULL;
     }
 
@@ -246,18 +246,18 @@ void *transfer_thread_func(void *arg) {
                   trx))
       continue;
     if (size != sizeof(acc2)) {
-      LOG_ERR("invalid result!");
+      LOG_ERR(-1, "invalid result!");
       return NULL;
     }
 
     if (rand() % 2) {
       if (trx_commit(trx) != trx) {
-        LOG_ERR("commit failed!");
+        LOG_ERR(-1, "commit failed!");
         return NULL;
       }
     } else {
       if (trx_abort(trx) != trx) {
-        LOG_ERR("abort failed!");
+        LOG_ERR(-1, "abort failed!");
         return NULL;
       }
     }
@@ -291,11 +291,11 @@ void *scan_thread_func(void *arg) {
     }
     if (!aborted) {
       if (trx_commit(trx) != trx) {
-        LOG_ERR("commit failed");
+        LOG_ERR(-1, "commit failed");
         return NULL;
       }
       if (sum_money != SUM_MONEY) {
-        LOG_ERR("inconsistent state is detected!");
+        LOG_ERR(-1, "inconsistent state is detected!");
         return NULL;
       }
     }
@@ -323,7 +323,7 @@ int multi_thread() {
   for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
     for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
       if (db_insert(table_id[tid], rid, acc.data, sizeof(acc))) {
-        LOG_ERR("failed to insert!");
+        LOG_ERR(-1, "failed to insert!");
         return -1;
       }
     }
@@ -385,7 +385,7 @@ void *long_transfer_thread_func(void *arg) {
         break;
       }
       if (size != sizeof(acc1)) {
-        LOG_ERR("invalid result!");
+        LOG_ERR(-1, "invalid result!");
         return NULL;
       }
 
@@ -396,7 +396,7 @@ void *long_transfer_thread_func(void *arg) {
         break;
       }
       if (size != sizeof(acc1)) {
-        LOG_ERR("invalid result!");
+        LOG_ERR(-1, "invalid result!");
         return NULL;
       }
 
@@ -405,7 +405,7 @@ void *long_transfer_thread_func(void *arg) {
         break;
       }
       if (size != sizeof(acc2)) {
-        LOG_ERR("invalid result!");
+        LOG_ERR(-1, "invalid result!");
         return NULL;
       }
 
@@ -416,19 +416,19 @@ void *long_transfer_thread_func(void *arg) {
         break;
       }
       if (size != sizeof(acc2)) {
-        LOG_ERR("invalid result!");
+        LOG_ERR(-1, "invalid result!");
         return NULL;
       }
     }
     if (!aborted) {
       if (rand() % 2) {
         if (trx_commit(trx) != trx) {
-          LOG_ERR("commit failed!");
+          LOG_ERR(-1, "commit failed!");
           return NULL;
         }
       } else {
         if (trx_abort(trx) != trx) {
-          LOG_ERR("abort failed!");
+          LOG_ERR(-1, "abort failed!");
           return NULL;
         }
       }
@@ -457,7 +457,7 @@ int multi_thread_long_trx() {
   for (int tid = 0; tid < TABLE_NUMBER; ++tid) {
     for (int rid = 0; rid < RECORD_NUMBER; ++rid) {
       if (db_insert(table_id[tid], rid, acc.data, sizeof(acc))) {
-        LOG_ERR("failed to insert!");
+        LOG_ERR(-1, "failed to insert!");
         return -1;
       }
     }
@@ -497,7 +497,7 @@ int scan_after_recovery() {
       account_t acc;
       uint16_t size;
       if (db_find(table_id[tid], rid, acc.data, &size, trx)) {
-        LOG_ERR("find (t%d, k%lld) failed at scanning after recovery!",
+        LOG_ERR(-1, "find (t%d, k%lld) failed at scanning after recovery!",
                 table_id[tid], rid);
         return -1;
       }
@@ -505,11 +505,11 @@ int scan_after_recovery() {
     }
   }
   if (trx_commit(trx) != trx) {
-    LOG_ERR("commit failed");
+    LOG_ERR(-1, "commit failed");
     return -1;
   }
   if (sum_money != SUM_MONEY) {
-    LOG_ERR("inconsistent state is detected!");
+    LOG_ERR(-1, "inconsistent state is detected!");
     return -1;
   }
   LOG_INFO("Scan is done.");

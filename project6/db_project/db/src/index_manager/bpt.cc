@@ -177,7 +177,7 @@ internal_slot_t *internal_slot_array(bpt_internal_page_t *page) {
 
 void init_leaf_page_struct(bpt_leaf_page_t *page, pagenum_t parent_page) {
   if (page == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(2, "invalid parameters");
     return;
   }
   memset(page, 0, sizeof(bpt_leaf_page_t));
@@ -192,7 +192,7 @@ void init_leaf_page_struct(bpt_leaf_page_t *page, pagenum_t parent_page) {
 void init_internal_page_struct(bpt_internal_page_t *page,
                                pagenum_t parent_page) {
   if (page == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(2, "invalid parameters");
     return;
   }
   memset(page, 0, sizeof(bpt_internal_page_t));
@@ -211,7 +211,7 @@ pagenum_t get_neighbor_pagenum(int64_t table_id, pagenum_t parent,
 
   if (num_of_keys == 0) {
     unpin(page);
-    LOG_ERR("num_of_keys is zero");
+    LOG_ERR(2, "num_of_keys is zero");
     return 0;
   }
 
@@ -236,7 +236,7 @@ pagenum_t get_neighbor_pagenum(int64_t table_id, pagenum_t parent,
   }
 
   unpin(page);
-  LOG_ERR("there is no page %llu in parent page %llu", pagenum, parent);
+  LOG_ERR(2, "there is no page %llu in parent page %llu", pagenum, parent);
   return 0;
 }
 
@@ -262,7 +262,7 @@ bool change_key(int64_t table_id, pagenum_t pagenum, bpt_key_t from,
     }
   }
   unpin(page);
-  LOG_ERR("cannot find key %d", from);
+  LOG_ERR(2, "cannot find key %d", from);
   return false;
 }
 
@@ -301,13 +301,13 @@ pagenum_t adjust_root(int64_t table_id, pagenum_t root) {
 pagenum_t insert_into_new_root(int64_t table_id, pagenum_t left, bpt_key_t key,
                                pagenum_t right) {
   if (left == 0 || right == 0) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(2, "invalid parameters");
     return 0;
   }
 
   pagenum_t root = buffer_alloc_page(table_id);
   if (root == 0) {
-    LOG_ERR("failed to allocate new page");
+    LOG_ERR(2, "failed to allocate new page");
     return 0;
   }
   auto *page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, root);
@@ -347,7 +347,7 @@ pagenum_t insert_into_parent(int64_t table_id, pagenum_t root, pagenum_t parent,
     }
     if (left_idx >= parent_num_of_keys) {
       unpin(parent_page);
-      LOG_ERR("failed to find left idx");
+      LOG_ERR(2, "failed to find left idx");
       return 0;
     }
   }
@@ -357,7 +357,7 @@ pagenum_t insert_into_parent(int64_t table_id, pagenum_t root, pagenum_t parent,
     if (!insert_into_internal(table_id, parent, parent_page, left_idx, key,
                               right)) {
       unpin(parent_page);
-      LOG_ERR("failed to insert into internal page");
+      LOG_ERR(2, "failed to insert into internal page");
       return 0;
     }
     set_dirty(parent_page);
@@ -413,7 +413,7 @@ bool insert_into_leaf(bpt_leaf_page_t *page, bpt_key_t key, uint16_t size,
 
   uint64_t required_space = sizeof(leaf_slot_t) + size;
   if (page->leaf_data.free_space < required_space) {
-    LOG_ERR("not enough free space");
+    LOG_ERR(2, "not enough free space");
     return false;
   }
 
@@ -463,11 +463,11 @@ pagenum_t insert_into_leaf_after_splitting(int64_t table_id, pagenum_t root,
                                            pagenum_t *sibling, bpt_key_t key,
                                            uint16_t size, const byte *value) {
   if (sibling == NULL || value == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(2, "invalid parameters");
     return 0;
   }
   if (size < 46 || size > 108) {
-    LOG_ERR("invalid slot data size");
+    LOG_ERR(2, "invalid slot data size");
     return 0;
   }
 
@@ -487,7 +487,7 @@ pagenum_t insert_into_leaf_after_splitting(int64_t table_id, pagenum_t root,
   *sibling = buffer_alloc_page(table_id);
   if (*sibling == 0) {
     unpin(page);
-    LOG_ERR("failed to allocate new sibling page");
+    LOG_ERR(2, "failed to allocate new sibling page");
     return 0;
   }
   auto *new_page = buffer_get_page_ptr<bpt_leaf_page_t>(table_id, *sibling);
@@ -510,7 +510,7 @@ pagenum_t insert_into_leaf_after_splitting(int64_t table_id, pagenum_t root,
   if (temp_slots == NULL) {
     unpin(page);
     unpin(new_page);
-    LOG_ERR("failed to allocate temp_slots array");
+    LOG_ERR(2, "failed to allocate temp_slots array");
     return 0;
   }
   for (int i = 0, j = 0; i < old_num_of_keys; ++i, ++j) {
@@ -656,7 +656,7 @@ pagenum_t delete_from_leaf(int64_t table_id, pagenum_t root, pagenum_t pagenum,
       table_id, page->leaf_data.header.parent_page, pagenum, &key_in_parent);
   if (neighbor_pagenum == 0) {
     unpin(page);
-    LOG_ERR("failed to find neighbor page");
+    LOG_ERR(2, "failed to find neighbor page");
     return 0;
   }
 
@@ -667,7 +667,7 @@ pagenum_t delete_from_leaf(int64_t table_id, pagenum_t root, pagenum_t pagenum,
       page->leaf_data.header.parent_page) {
     unpin(page);
     unpin(neighbor_page);
-    LOG_ERR("parent is not same");
+    LOG_ERR(2, "parent is not same");
     return 0;
   }
 
@@ -717,7 +717,7 @@ pagenum_t merge_leaf(int64_t table_id, pagenum_t root, bpt_key_t key_in_parent,
                           right->page.data + right_slots[i].offset)) {
       unpin(page);
       unpin(neighbor);
-      LOG_ERR("failed to insert");
+      LOG_ERR(2, "failed to insert");
       return 0;
     }
   }
@@ -773,7 +773,7 @@ pagenum_t redistribute_leaf(int64_t table_id, pagenum_t root,
                             right->page.data + slot.offset)) {
         unpin(page);
         unpin(neighbor);
-        LOG_ERR("failed to insert slot into left page %llu", pagenum);
+        LOG_ERR(2, "failed to insert slot into left page %llu", pagenum);
         return 0;
       }
     }
@@ -801,7 +801,7 @@ pagenum_t redistribute_leaf(int64_t table_id, pagenum_t root,
                             left->page.data + slot.offset)) {
         unpin(page);
         unpin(neighbor);
-        LOG_ERR("failed to insert slot into right page %llu", pagenum);
+        LOG_ERR(2, "failed to insert slot into right page %llu", pagenum);
         return 0;
       }
     }
@@ -835,7 +835,7 @@ bool insert_into_internal(int64_t table_id, pagenum_t pagenum,
                           bpt_internal_page_t *page, int left_idx,
                           bpt_key_t key, pagenum_t val) {
   if (page == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(2, "invalid parameters");
     return false;
   }
 
@@ -843,12 +843,12 @@ bool insert_into_internal(int64_t table_id, pagenum_t pagenum,
   auto slots = internal_slot_array(page);
 
   if (num_of_keys >= kMaxNumInternalPageEntries) {
-    LOG_ERR("not enough space");
+    LOG_ERR(2, "not enough space");
     return false;
   }
 
   if (left_idx >= (int64_t)num_of_keys) {
-    LOG_ERR("invalid left idx");
+    LOG_ERR(2, "invalid left idx");
     return false;
   }
 
@@ -871,7 +871,7 @@ pagenum_t insert_into_internal_after_splitting(int64_t table_id, pagenum_t root,
                                                pagenum_t *sibling, int left_idx,
                                                bpt_key_t key, pagenum_t val) {
   if (sibling == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(2, "invalid parameters");
     return 0;
   }
 
@@ -890,7 +890,7 @@ pagenum_t insert_into_internal_after_splitting(int64_t table_id, pagenum_t root,
   *sibling = buffer_alloc_page(table_id);
   if (*sibling == 0) {
     unpin(page);
-    LOG_ERR("failed to allocate new sibling page");
+    LOG_ERR(2, "failed to allocate new sibling page");
     return 0;
   }
   auto *new_page = buffer_get_page_ptr<bpt_internal_page_t>(table_id, *sibling);
@@ -907,7 +907,7 @@ pagenum_t insert_into_internal_after_splitting(int64_t table_id, pagenum_t root,
   if (temp_slots == NULL) {
     unpin(page);
     unpin(new_page);
-    LOG_ERR("failed to allocate temp_slots array");
+    LOG_ERR(2, "failed to allocate temp_slots array");
     return 0;
   }
   for (int i = 0, j = 0; i < old_num_of_keys; ++i, ++j) {
@@ -1010,7 +1010,7 @@ pagenum_t delete_from_parent(int64_t table_id, pagenum_t root,
   pagenum = delete_entry_from_internal(page, pagenum, key, val);
   if (pagenum == 0) {
     unpin(page);
-    LOG_ERR("failed to delete entry from internal page");
+    LOG_ERR(2, "failed to delete entry from internal page");
     return 0;
   }
 
@@ -1036,7 +1036,7 @@ pagenum_t delete_from_parent(int64_t table_id, pagenum_t root,
                            pagenum, &key_in_parent);
   if (neighbor_pagenum == 0) {
     unpin(page);
-    LOG_ERR("failed to find neighbor page");
+    LOG_ERR(2, "failed to find neighbor page");
     return 0;
   }
 
@@ -1048,7 +1048,7 @@ pagenum_t delete_from_parent(int64_t table_id, pagenum_t root,
       page->internal_data.header.parent_page) {
     unpin(page);
     unpin(neighbor_page);
-    LOG_ERR("parent is not same");
+    LOG_ERR(2, "parent is not same");
     return 0;
   }
 
@@ -1099,7 +1099,7 @@ pagenum_t merge_internal(int64_t table_id, pagenum_t root,
                             right->internal_data.first_child_page)) {
     unpin(page);
     unpin(neighbor);
-    LOG_ERR("failed to insert");
+    LOG_ERR(2, "failed to insert");
     return 0;
   }
 
@@ -1110,7 +1110,7 @@ pagenum_t merge_internal(int64_t table_id, pagenum_t root,
                               slot.key, slot.pagenum)) {
       unpin(page);
       unpin(neighbor);
-      LOG_ERR("failed to insert");
+      LOG_ERR(2, "failed to insert");
       return 0;
     }
   }
@@ -1153,7 +1153,7 @@ pagenum_t redistribute_internal(int64_t table_id, pagenum_t root,
                               right_first_page)) {
       unpin(page);
       unpin(neighbor);
-      LOG_ERR("failed to insert");
+      LOG_ERR(2, "failed to insert");
       return 0;
     }
 
@@ -1275,7 +1275,7 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
                                 new_val_size, page->page.data + slots[i].offset,
                                 value);
         if (rec == NULL) {
-          LOG_ERR("failed to make update log");
+          LOG_ERR(2, "failed to make update log");
           return false;
         }
       }
@@ -1288,12 +1288,12 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
         if (trx != NULL) {
           if (push_into_log_buffer(rec)) {
             free(rec);
-            LOG_ERR("failed to push log into log buffer");
+            LOG_ERR(2, "failed to push log into log buffer");
             return false;
           }
           if (trx_log_update(trx, rec)) {
             free(rec);
-            LOG_ERR("failed to add log into the trx");
+            LOG_ERR(2, "failed to add log into the trx");
             return false;
           }
           page->leaf_data.header.page_lsn = rec->lsn;
@@ -1312,11 +1312,11 @@ bool bpt_update(int64_t table_id, pagenum_t root, bpt_key_t key, byte *value,
 pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,
                      uint16_t size, const byte *value) {
   if (value == NULL) {
-    LOG_ERR("invalid parameters");
+    LOG_ERR(2, "invalid parameters");
     return 0;
   }
   if (size < 46 || size > 108) {
-    LOG_ERR("invalid slot data size");
+    LOG_ERR(2, "invalid slot data size");
     return 0;
   }
 
@@ -1332,7 +1332,7 @@ pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,
   if (root == 0) {
     root = buffer_alloc_page(table_id);
     if (root == 0) {
-      LOG_ERR("failed to allocate new page");
+      LOG_ERR(2, "failed to allocate new page");
       return 0;
     }
 
@@ -1362,7 +1362,7 @@ pagenum_t bpt_insert(int64_t table_id, pagenum_t root, bpt_key_t key,
   if (page->leaf_data.free_space >= required_space) {
     if (!insert_into_leaf(page, key, size, value)) {
       unpin(page);
-      LOG_ERR("failed to insert into leaf");
+      LOG_ERR(2, "failed to insert into leaf");
       return 0;
     }
     set_dirty(page);
