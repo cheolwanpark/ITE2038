@@ -151,7 +151,7 @@ frame_t *buffer_evict_frame() {
       iter = iter->prev;
   }
   if (iter == NULL) {
-    LOG_ERR(3, "all buffer frame is pinned, cannot evict frame");
+    LOG_ERR(10, "all buffer frame is pinned, cannot evict frame");
     return NULL;
   }
 
