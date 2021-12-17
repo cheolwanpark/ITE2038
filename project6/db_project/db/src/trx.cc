@@ -264,15 +264,14 @@ int trx_abort(trx_id_t trx_id) {
   if (!is_trx_assigned(trx_id)) {
     pthread_mutex_unlock(&trx_table_latch);
     pthread_mutex_unlock(&lock_table_latch);
-    LOG_ERR(6, "there is no trx with id = %d", trx_id);
-    return 0;
+    return trx_id;
   }
   auto *trx = trx_table[trx_id];
   trx->releasing = true;
+  auto *log_iter = trx->log_head;
   pthread_mutex_unlock(&trx_table_latch);
 
   // revert all updates
-  auto *log_iter = trx->log_head;
   bpt_page_t *page;
   while (log_iter != NULL) {
     // overwrite records with log
