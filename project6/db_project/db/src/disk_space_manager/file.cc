@@ -73,7 +73,8 @@ void __file_read_header_page(int64_t table_id, header_page_t* dest) {
   }
 }
 
-void __file_write_header_page(int64_t table_id, const header_page_t* src) {
+void __file_write_header_page(int64_t table_id, const header_page_t* src,
+                              int sync = true) {
   if (table_id < 0 || src == NULL) {
     LOG_ERR(1, "invalid parameters");
     return;
@@ -87,7 +88,7 @@ void __file_write_header_page(int64_t table_id, const header_page_t* src) {
     LOG_ERR(1, "cannot write header page");
     return;
   }
-  if (fsync(table_id) < 0) {
+  if (sync && fsync(table_id) < 0) {
     LOG_ERR(1, "cannot sync write header page, errno: %s", strerror(errno));
     return;
   }
@@ -323,8 +324,9 @@ void file_read_page(int64_t table_id, pagenum_t pagenum, page_t* dest) {
 }
 
 // Write an in-memory page(src) to the on-disk page
-void file_write_page(int64_t table_id, pagenum_t pagenum, const page_t* src) {
-  __file_write_page(table_id, pagenum, src);
+void file_write_page(int64_t table_id, pagenum_t pagenum, const page_t* src,
+                     int sync) {
+  __file_write_page(table_id, pagenum, src, sync);
 }
 
 // Read an on-disk header page into the in-memory header page structure(dest)
@@ -333,11 +335,21 @@ void file_read_header_page(int64_t table_id, header_page_t* dest) {
 }
 
 // Write in-memory header page(src) to the on-disk header page
-void file_write_header_page(int64_t table_id, const header_page_t* src) {
-  __file_write_header_page(table_id, src);
+void file_write_header_page(int64_t table_id, const header_page_t* src,
+                            int sync) {
+  __file_write_header_page(table_id, src, sync);
 }
 
 uint64_t file_size(int64_t table_id) { return __file_size(table_id); }
+
+void file_sync_all() {
+  for (auto table_id : table_id_map) {
+    if (fsync(table_id.second) < 0) {
+      LOG_ERR(1, "cannot sync, %s", strerror(errno));
+      return;
+    }
+  }
+}
 
 // Stop referencing the database file
 void file_close_table_files() {

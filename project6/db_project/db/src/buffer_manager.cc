@@ -510,9 +510,9 @@ int buffer_flush_all_frames() {
   auto iter = head;
   for (auto iter = head; iter != NULL; iter = iter->next) {
     if (iter->is_dirty)
-      file_write_page(iter->table_id, iter->page_num, &iter->frame);
-    pthread_mutex_unlock(&iter->page_latch);
+      file_write_page(iter->table_id, iter->page_num, &iter->frame, false);
   }
+  file_sync_all();
   pthread_mutex_unlock(&buffer_manager_latch);
   return 0;
 }

@@ -53,16 +53,21 @@ void file_free_page(int64_t table_id, pagenum_t pagenum);
 void file_read_page(int64_t table_id, pagenum_t pagenum, page_t *dest);
 
 // Write an in-memory page(src) to the on-disk page
-void file_write_page(int64_t table_id, pagenum_t pagenum, const page_t *src);
+void file_write_page(int64_t table_id, pagenum_t pagenum, const page_t *src,
+                     int sync = true);
 
 // Read an on-disk header page into the in-memory header page structure(dest)
 void file_read_header_page(int64_t table_id, header_page_t *dest);
 
 // Write in-memory header page(src) to the on-disk header page
-void file_write_header_page(int64_t table_id, const header_page_t *src);
+void file_write_header_page(int64_t table_id, const header_page_t *src,
+                            int sync = true);
 
 // Calculate file size (byte)
 uint64_t file_size(int64_t table_id);
+
+// sync file descriptor
+void file_sync_all();
 
 // Stop referencing the database file
 void file_close_table_files();
