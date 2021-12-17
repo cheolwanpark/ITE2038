@@ -152,10 +152,6 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
     LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
   }
-  if (fflush(logmsg_fp) != 0) {
-    LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
-    return 1;
-  }
 
   set_trx_counter(max_trx_id + 1);
 
@@ -292,10 +288,6 @@ int redo_phase(int log_num, std::set<trx_id_t> &winners,
 
     ++processed_log_num;
     if (processed_log_num >= log_num) {
-      if (fflush(logmsg_fp) != 0) {
-        LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
-        return 1;
-      }
       return 0;
     }
   }
@@ -303,10 +295,6 @@ int redo_phase(int log_num, std::set<trx_id_t> &winners,
 
   if (fprintf(logmsg_fp, "[REDO] Redo pass end\n") < 0) {
     LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
-    return 1;
-  }
-  if (fflush(logmsg_fp) != 0) {
-    LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
     return 1;
   }
 
@@ -421,10 +409,6 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
 
     ++processed_log_num;
     if (processed_log_num >= log_num) {
-      if (fflush(logmsg_fp) != 0) {
-        LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
-        return 1;
-      }
       return 0;
     }
   }
@@ -432,10 +416,6 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
 
   if (fprintf(logmsg_fp, "[UNDO] Undo pass end\n") < 0) {
     LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
-    return 1;
-  }
-  if (fflush(logmsg_fp) != 0) {
-    LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
     return 1;
   }
 
@@ -458,6 +438,13 @@ int recovery_process(int flag, int log_num) {
     LOG_ERR(4, "failed to perform undo!");
     return 1;
   }
+
+  // flush logmsg file
+  if (fflush(logmsg_fp) != 0) {
+    LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
+    return 1;
+  }
+
   pthread_mutex_unlock(&log_latch);
   return 0;
 }
