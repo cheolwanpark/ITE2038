@@ -34,6 +34,7 @@ frame_t *frames = NULL, *head = NULL, *tail = NULL;
 
 pthread_mutex_t buffer_manager_latch = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t frame_map_latch = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t wait_for_free_frame = PTHREAD_COND_INITIALIZER;
 
 // load page into buffer
 // return loaded frame ptr (NULL on failed)
@@ -107,6 +108,7 @@ void __unpin(int64_t table_id, pagenum_t pagenum) {
     LOG_ERR(3, "failed to unlock page latch");
     return;
   }
+  pthread_cond_signal(&wait_for_free_frame);
 }
 
 frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
@@ -128,12 +130,7 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
   // push to frame_map
   auto frame_id = std::make_pair(table_id, pagenum);
   pthread_mutex_lock(&frame_map_latch);
-  auto res = frame_map.emplace(frame_id, frame);
-  if (!res.second) {
-    pthread_mutex_unlock(&frame_map_latch);
-    LOG_ERR(3, "failed to emplace into the frame map");
-    return NULL;
-  }
+  frame_map.emplace(frame_id, frame);
   auto hash_key = frame_map.hash_function()(frame_id);
   frame_cache[hash_key % cache_size] = frame;
   pthread_mutex_unlock(&frame_map_latch);
@@ -143,16 +140,18 @@ frame_t *buffer_load_page(int64_t table_id, pagenum_t pagenum) {
 frame_t *buffer_evict_frame() {
   // find evict page
   // buffer_manager_latch is already locked in buffer_get_page_ptr
-  auto iter = tail;
-  while (iter != NULL) {
-    if (pthread_mutex_trylock(&iter->page_latch) == 0)
-      break;
-    else
-      iter = iter->prev;
-  }
-  if (iter == NULL) {
-    LOG_ERR(10, "all buffer frame is pinned, cannot evict frame");
-    return NULL;
+  frame_t *iter = NULL;
+  while (iter == NULL) {
+    iter = tail;
+    while (iter != NULL) {
+      if (pthread_mutex_trylock(&iter->page_latch) == 0)
+        break;
+      else
+        iter = iter->prev;
+    }
+    if (iter == NULL) {
+      pthread_cond_wait(&wait_for_free_frame, &buffer_manager_latch);
+    }
   }
 
   // flush if dirty flag set
@@ -362,6 +361,10 @@ int free_buffer_manager() {
   if (frame_cache != NULL) free(frame_cache);
   pthread_mutex_unlock(&frame_map_latch);
   pthread_mutex_unlock(&buffer_manager_latch);
+
+  pthread_mutex_destroy(&frame_map_latch);
+  pthread_mutex_destroy(&buffer_manager_latch);
+  pthread_cond_destroy(&wait_for_free_frame);
   return 0;
 }
 
@@ -477,6 +480,7 @@ void unpin(page_t *page) {
     LOG_ERR(3, "failed to unlock page latch");
     return;
   }
+  pthread_cond_signal(&wait_for_free_frame);
 }
 
 void unpin_header(int64_t table_id) {

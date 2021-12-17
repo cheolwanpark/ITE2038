@@ -10,16 +10,17 @@
 #include "recovery.h"
 #include "trx.h"
 
-const int TRANSFER_THREAD_NUM = 8;
+const int TRANSFER_THREAD_NUM = 10;
 const int SCAN_THREAD_NUM = 3;
+const int MULTI_THREAD_BUFFER_SIZE = TRANSFER_THREAD_NUM + SCAN_THREAD_NUM;
 
-const long long TABLE_NUMBER = 2;
-const long long RECORD_NUMBER = 10000;
+const long long TABLE_NUMBER = 50;
+const long long RECORD_NUMBER = 1;
 
 const int TRANSFER_COUNT = 5000;
-const int SCAN_COUNT = 200;
+const int SCAN_COUNT = 10000;
 
-const int LONG_TRX_TEST_BUF_SIZE = 10;
+const int LONG_TRX_TEST_BUF_SIZE = 3;
 const int TRANSFER_PER_TRX_IN_LONG_TRX = 100;
 
 const long long INITIAL_MONEY = 100000;
@@ -43,8 +44,8 @@ int scan_after_recovery();
 // int main(int argc, char **argv) { return single_thread(); }
 // int main(int argc, char **argv) { return print_log(20000); }
 // int main(int argc, char **argv) { return multi_thread(); }
-// int main(int argc, char **argv) { return multi_thread_long_trx(); }
-int main(int argc, char **argv) { return scan_after_recovery(); }
+int main(int argc, char **argv) { return multi_thread_long_trx(); }
+// int main(int argc, char **argv) { return scan_after_recovery(); }
 
 int print_log(int n) {
   init_db(100, 0, 100, LOG_FILENAME, LOGMSG_FILENAME);
@@ -308,7 +309,7 @@ void *scan_thread_func(void *arg) {
 int multi_thread() {
   char filename[TABLE_NUMBER][100];
   int64_t table_id[TABLE_NUMBER];
-  init_db(5000, 0, 100, LOG_FILENAME, LOGMSG_FILENAME);
+  init_db(MULTI_THREAD_BUFFER_SIZE, 0, 100, LOG_FILENAME, LOGMSG_FILENAME);
   for (int i = 0; i < TABLE_NUMBER; ++i) {
     sprintf(filename[i], "DATA%d", i + 1);
     remove(filename[i]);

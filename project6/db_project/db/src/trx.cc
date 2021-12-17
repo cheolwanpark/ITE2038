@@ -135,13 +135,7 @@ int trx_begin() {
   new_trx->releasing = false;
   new_trx->visited = false;
   new_trx->last_lsn = 0;
-  auto res = trx_table.emplace(new_trx->id, new_trx);
-  if (!res.second) {
-    free(new_trx);
-    pthread_mutex_unlock(&trx_table_latch);
-    LOG_ERR(6, "insertion failed");
-    return 0;
-  }
+  trx_table.emplace(new_trx->id, new_trx);
   ++trx_counter;
   if (trx_counter == INT_MAX) trx_counter = 1;
   pthread_mutex_unlock(&trx_table_latch);
@@ -1021,13 +1015,7 @@ int add_active_trx(trx_id_t trx_id) {
   new_trx->visited = false;
   new_trx->last_lsn = 0;
 
-  auto res = trx_table.emplace(new_trx->id, new_trx);
-  if (!res.second) {
-    free(new_trx);
-    pthread_mutex_unlock(&trx_table_latch);
-    LOG_ERR(4, "insertion failed");
-    return 1;
-  }
+  trx_table.emplace(new_trx->id, new_trx);
   pthread_mutex_unlock(&trx_table_latch);
   return 0;
 }
