@@ -67,7 +67,6 @@ int set_next_undo_lsn(log_record_t *rec, uint64_t val) {
 
 int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
   uint32_t log_size;
-  uint32_t current_position = 0;
   uint64_t current_lsn = 0;
   trx_id_t max_trx_id = 0;
 
@@ -84,20 +83,17 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
     return 1;
   }
 
+  if (lseek(log_fd, 0, SEEK_SET) < 0) {
+    LOG_ERR(4, "failed to seek, %s", strerror(errno));
+    return 1;
+  }
+
   while (true) {
-    if (lseek(log_fd, current_position, SEEK_SET) < 0) {
-      LOG_ERR(4, "failed to seek, %s", strerror(errno));
-      return 1;
-    }
     if (read(log_fd, &log_size, sizeof(log_size)) != sizeof(log_size) ||
         log_size == 0)
       break;
-    if (lseek(log_fd, -4, SEEK_CUR) < 0) {
-      LOG_ERR(4, "failed to seek, %s", strerror(errno));
-      return 1;
-    }
 
-    if (read(log_fd, rec, log_size) != log_size) break;
+    if (read(log_fd, &rec->lsn, log_size - 4) != log_size - 4) break;
 
     current_lsn = rec->lsn;
     switch (rec->type) {
@@ -120,7 +116,6 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
         }
         break;
     }
-    current_position += log_size;
   }
   free(rec);
 
@@ -187,20 +182,18 @@ int redo_phase(int log_num, std::set<trx_id_t> &winners,
 
   int processed_log_num = 0;
   log_num = log_num < 0 ? INT32_MAX : log_num;
+
   while (true) {
     if (lseek(log_fd, current_position, SEEK_SET) < 0) {
       LOG_ERR(4, "failed to seek, %s", strerror(errno));
       return 1;
     }
+
     if (read(log_fd, &log_size, sizeof(log_size)) != sizeof(log_size) ||
         log_size == 0)
       break;
-    if (lseek(log_fd, -4, SEEK_CUR) < 0) {
-      LOG_ERR(4, "failed to seek, %s", strerror(errno));
-      return 1;
-    }
 
-    if (read(log_fd, rec, log_size) != log_size) break;
+    if (read(log_fd, &rec->lsn, log_size - 4) != log_size - 4) break;
 
     auto is_loser = losers.find(rec->trx_id) != losers.end();
 
