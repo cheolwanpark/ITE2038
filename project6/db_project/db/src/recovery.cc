@@ -162,7 +162,8 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
   return 0;
 }
 
-int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
+int redo_phase(int log_num, std::set<trx_id_t> &winners,
+               std::set<trx_id_t> &losers,
                std::map<uint64_t, uint64_t> &lsn_position_map) {
   uint32_t log_size;
   uint32_t current_position = 0;
@@ -188,6 +189,8 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
     return 1;
   }
 
+  int processed_log_num = 0;
+  log_num = log_num < 0 ? INT32_MAX : log_num;
   while (true) {
     if (lseek(log_fd, current_position, SEEK_SET) < 0) {
       LOG_ERR(4, "failed to seek, %s", strerror(errno));
@@ -286,6 +289,15 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
     }
 
     current_position += log_size;
+
+    ++processed_log_num;
+    if (processed_log_num >= log_num) {
+      if (fflush(logmsg_fp) != 0) {
+        LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
+        return 1;
+      }
+      return 0;
+    }
   }
   free(rec);
 
@@ -301,7 +313,8 @@ int redo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
   return 0;
 }
 
-int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
+int undo_phase(int log_num, std::set<trx_id_t> &winners,
+               std::set<trx_id_t> &losers,
                std::map<uint64_t, uint64_t> &lsn_pos_map) {
   uint32_t log_size;
 
@@ -323,6 +336,8 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
     next_undo_lsn_map[id] = UINT64_MAX;
   }
 
+  int processed_log_num = 0;
+  log_num = log_num < 0 ? INT32_MAX : log_num;
   for (auto it = lsn_pos_map.rbegin(); it != lsn_pos_map.rend(); it++) {
     auto lsn = it->first;
     auto position = it->second;
@@ -403,6 +418,15 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
         return 1;
       }
     }
+
+    ++processed_log_num;
+    if (processed_log_num >= log_num) {
+      if (fflush(logmsg_fp) != 0) {
+        LOG_ERR(4, "failed to flush logmsg file, %s", strerror(errno));
+        return 1;
+      }
+      return 0;
+    }
   }
   free(rec);
 
@@ -418,7 +442,7 @@ int undo_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers,
   return 0;
 }
 
-int recovery_process() {
+int recovery_process(int flag, int log_num) {
   std::set<trx_id_t> winners, losers;
   std::map<uint64_t, uint64_t> lsn_position_map;
   pthread_mutex_lock(&log_latch);
@@ -426,11 +450,11 @@ int recovery_process() {
     LOG_ERR(4, "failed to perform an alysis!");
     return 1;
   }
-  if (redo_phase(winners, losers, lsn_position_map)) {
+  if (redo_phase(flag == 1 ? log_num : -1, winners, losers, lsn_position_map)) {
     LOG_ERR(4, "failed to perform redo!");
     return 1;
   }
-  if (undo_phase(winners, losers, lsn_position_map)) {
+  if (undo_phase(flag == 2 ? log_num : -1, winners, losers, lsn_position_map)) {
     LOG_ERR(4, "failed to perform undo!");
     return 1;
   }
@@ -483,7 +507,7 @@ int init_recovery(int flag, int log_num, char *log_path, char *logmsg_path) {
       return 1;
     }
 
-    if (recovery_process()) {
+    if (recovery_process(flag, log_num)) {
       LOG_ERR(4, "failed to recovery!");
       return 1;
     }
