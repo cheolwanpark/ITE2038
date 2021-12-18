@@ -160,7 +160,7 @@ int analysis_phase(std::set<trx_id_t> &winners, std::set<trx_id_t> &losers) {
 
 int redo_phase(int log_num, std::set<trx_id_t> &winners,
                std::set<trx_id_t> &losers,
-               std::map<uint64_t, uint64_t> &lsn_position_map) {
+               std::map<uint64_t, log_record_t *> &losers_log_map) {
   uint32_t log_size;
   uint32_t current_position = 0;
 
@@ -275,7 +275,13 @@ int redo_phase(int log_num, std::set<trx_id_t> &winners,
     }
 
     if (is_loser) {
-      lsn_position_map[rec->lsn] = current_position;
+      auto *rec_copy = (log_record_t *)malloc(rec->log_size);
+      if (rec_copy == NULL) {
+        LOG_ERR(4, "failed to allocate log record copy");
+        return 1;
+      }
+      memcpy(rec_copy, rec, rec->log_size);
+      losers_log_map[rec->lsn] = rec_copy;
       auto *trx = get_trx(rec->trx_id);
       if (trx == NULL) {
         LOG_ERR(4, "loser trx %d is not in the active trx table");
@@ -303,17 +309,7 @@ int redo_phase(int log_num, std::set<trx_id_t> &winners,
 
 int undo_phase(int log_num, std::set<trx_id_t> &winners,
                std::set<trx_id_t> &losers,
-               std::map<uint64_t, uint64_t> &lsn_pos_map) {
-  uint32_t log_size;
-
-  // allocate maximum size log_record (max slot length is 108)
-  log_record_t *rec =
-      (log_record_t *)malloc(sizeof(log_record_t) + 108 * 2 + 8);
-  if (rec == NULL) {
-    LOG_ERR(4, "failed to allocate record struct, %s", strerror(errno));
-    return 1;
-  }
-
+               std::map<uint64_t, log_record_t *> &losers_log_map) {
   if (fprintf(logmsg_fp, "[UNDO] Undo pass start\n") < 0) {
     LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
     return 1;
@@ -326,22 +322,9 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
 
   int processed_log_num = 0;
   log_num = log_num < 0 ? INT32_MAX : log_num;
-  for (auto it = lsn_pos_map.rbegin(); it != lsn_pos_map.rend(); it++) {
+  for (auto it = losers_log_map.rbegin(); it != losers_log_map.rend(); it++) {
     auto lsn = it->first;
-    auto position = it->second;
-
-    if (lseek(log_fd, position, SEEK_SET) < 0) {
-      LOG_ERR(4, "failed to seek, %s", strerror(errno));
-      return 1;
-    }
-    if (read(log_fd, &log_size, sizeof(log_size)) != sizeof(log_size) ||
-        log_size == 0)
-      break;
-    if (lseek(log_fd, -4, SEEK_CUR) < 0) {
-      LOG_ERR(4, "failed to seek, %s", strerror(errno));
-      return 1;
-    }
-    if (read(log_fd, rec, log_size) != log_size) break;
+    auto *rec = it->second;
 
     if (rec->type == BEGIN_LOG) {
       auto *trx = get_trx(rec->trx_id);
@@ -407,12 +390,13 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
       }
     }
 
+    free(rec);
+
     ++processed_log_num;
     if (processed_log_num >= log_num) {
       return 0;
     }
   }
-  free(rec);
 
   if (fprintf(logmsg_fp, "[UNDO] Undo pass end\n") < 0) {
     LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
@@ -424,17 +408,17 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
 
 int recovery_process(int flag, int log_num) {
   std::set<trx_id_t> winners, losers;
-  std::map<uint64_t, uint64_t> lsn_position_map;
+  std::map<uint64_t, log_record_t *> losers_log_map;
   pthread_mutex_lock(&log_latch);
   if (analysis_phase(winners, losers)) {
     LOG_ERR(4, "failed to perform an alysis!");
     return 1;
   }
-  if (redo_phase(flag == 1 ? log_num : -1, winners, losers, lsn_position_map)) {
+  if (redo_phase(flag == 1 ? log_num : -1, winners, losers, losers_log_map)) {
     LOG_ERR(4, "failed to perform redo!");
     return 1;
   }
-  if (undo_phase(flag == 2 ? log_num : -1, winners, losers, lsn_position_map)) {
+  if (undo_phase(flag == 2 ? log_num : -1, winners, losers, losers_log_map)) {
     LOG_ERR(4, "failed to perform undo!");
     return 1;
   }
