@@ -349,17 +349,17 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
         LOG_ERR(4, "failed to get loser trx %d", rec->trx_id);
         return 1;
       }
-      auto *rec = create_log(trx, ROLLBACK_LOG);
-      if (rec == NULL) {
+      auto *new_rec = create_log(trx, ROLLBACK_LOG);
+      if (new_rec == NULL) {
         LOG_ERR(4, "failed to create log");
         return 0;
       }
-      if (push_into_log_buffer(rec)) {
-        free(rec);
+      if (push_into_log_buffer(new_rec)) {
+        free(new_rec);
         LOG_ERR(4, "failed to push into log buffer");
         return 0;
       }
-      free(rec);
+      free(new_rec);
 
       losers.erase(rec->trx_id);
       if (remove_active_trx(rec->trx_id)) {
@@ -409,6 +409,7 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
 
     ++processed_log_num;
     if (processed_log_num >= log_num) {
+      free(rec);
       return 0;
     }
   }
