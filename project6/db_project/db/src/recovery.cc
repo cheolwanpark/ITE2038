@@ -368,13 +368,20 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
       }
     }
 
-    if (next_undo_lsn_map[rec->trx_id] < rec->lsn)
+    if (next_undo_lsn_map[rec->trx_id] < rec->lsn) continue;
+
+    auto *page = buffer_get_page_ptr<bpt_page_t>(rec->table_id, rec->page_num);
+    if (page->header.page_lsn < rec->lsn) {
+      unpin(page);
       continue;
+    }
+
     else if (rec->type == COMPENSATE_LOG) {
       next_undo_lsn_map[rec->trx_id] = get_next_undo_lsn(rec);
     } else if (rec->type == UPDATE_LOG) {
       auto *trx = get_trx(rec->trx_id);
       if (trx == NULL) {
+        unpin(page);
         LOG_ERR(4, "failed to get loser trx %d", rec->trx_id);
         return 1;
       }
@@ -382,30 +389,31 @@ int undo_phase(int log_num, std::set<trx_id_t> &winners,
                                             rec->offset, rec->len, get_new(rec),
                                             get_old(rec), rec->prev_lsn);
       if (new_rec == NULL) {
+        unpin(page);
         LOG_ERR(4, "failed to create new compensate log");
         return 0;
       }
 
-      auto *page =
-          buffer_get_page_ptr<bpt_page_t>(rec->table_id, rec->page_num);
       memcpy(page->page.data + rec->offset, get_old(rec), rec->len);
       set_dirty(page);
       if (push_into_log_buffer(new_rec)) {
         free(new_rec);
+        unpin(page);
         LOG_ERR(4, "failed to push log into log buffer");
         return 0;
       }
       page->header.page_lsn = new_rec->lsn;
       set_dirty(page);
-      unpin(page);
       free(new_rec);
 
       if (fprintf(logmsg_fp, "LSN %llu [UPDATE] Transaction id %d undo apply\n",
                   rec->lsn, rec->trx_id) < 0) {
+        unpin(page);
         LOG_ERR(4, "failed to write into logmsg file, %s", strerror(errno));
         return 1;
       }
     }
+    unpin(page);
 
     ++processed_log_num;
     if (processed_log_num >= log_num) {
