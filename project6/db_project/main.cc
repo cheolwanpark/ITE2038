@@ -14,13 +14,13 @@ const int TRANSFER_THREAD_NUM = 10;
 const int SCAN_THREAD_NUM = 3;
 const int MULTI_THREAD_BUFFER_SIZE = TRANSFER_THREAD_NUM + SCAN_THREAD_NUM;
 
-const long long TABLE_NUMBER = 50;
-const long long RECORD_NUMBER = 1;
+const long long TABLE_NUMBER = 4;
+const long long RECORD_NUMBER = 10000;
 
 const int TRANSFER_COUNT = 5000;
 const int SCAN_COUNT = 10000;
 
-const int LONG_TRX_TEST_BUF_SIZE = 3;
+const int LONG_TRX_TEST_BUF_SIZE = 100;
 const int TRANSFER_PER_TRX_IN_LONG_TRX = 100;
 
 const long long INITIAL_MONEY = 100000;
@@ -44,8 +44,8 @@ int scan_after_recovery();
 // int main(int argc, char **argv) { return single_thread(); }
 // int main(int argc, char **argv) { return print_log(20000); }
 // int main(int argc, char **argv) { return multi_thread(); }
-int main(int argc, char **argv) { return multi_thread_long_trx(); }
-// int main(int argc, char **argv) { return scan_after_recovery(); }
+// int main(int argc, char **argv) { return multi_thread_long_trx(); }
+int main(int argc, char **argv) { return scan_after_recovery(); }
 
 int print_log(int n) {
   init_db(100, 0, 100, LOG_FILENAME, LOGMSG_FILENAME);
@@ -466,6 +466,8 @@ int multi_thread_long_trx() {
   buffer_flush_all_frames();
   LOG_INFO("initialization done");
 
+  auto start = clock();
+
   pthread_t transfer_threads[TRANSFER_THREAD_NUM];
   for (int i = 0; i < TRANSFER_THREAD_NUM; ++i) {
     pthread_create(&transfer_threads[i], 0, long_transfer_thread_func,
@@ -476,16 +478,20 @@ int multi_thread_long_trx() {
     pthread_join(transfer_threads[i], NULL);
   }
 
+  auto time = clock() - start;
+  LOG_INFO("complete in %llf seconds", (double)time / CLOCKS_PER_SEC);
+
   for (int i = 0; i < TABLE_NUMBER; ++i) {
     remove(filename[i]);
   }
+
   return 0;
 }
 
 int scan_after_recovery() {
   char filename[TABLE_NUMBER][100];
   int64_t table_id[TABLE_NUMBER];
-  init_db(5000, 0, 100, LOG_FILENAME, LOGMSG_FILENAME);
+  init_db(500, 0, 100, LOG_FILENAME, LOGMSG_FILENAME);
   for (int i = 0; i < TABLE_NUMBER; ++i) {
     sprintf(filename[i], "DATA%d", i + 1);
     table_id[i] = file_open_table_file(filename[i]);
